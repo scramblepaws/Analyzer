@@ -95,6 +95,14 @@ function SV.init()
     print("[Analyzer] ScriptViewer initialized")
 end
 
+function SV.move()
+    local area = UI.MainWindow.getContentArea()
+    if not area or not SV._block then return end
+    SV._path:setPosition(area.x + 8, area.y + 4)
+    SV._copy:setPosition(area.x + area.width - 88, area.y + 2)
+    SV._block:setPosition(area.x, area.y + 30)
+end
+
 function SV.cleanup()
     for _, c in ipairs(SV._conns) do pcall(function() c.Disconnect(c) end) end
     SV._conns = {}

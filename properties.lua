@@ -117,6 +117,14 @@ function Properties.init()
     print("[Analyzer] Properties initialized")
 end
 
+function Properties.move()
+    local area = UI.MainWindow.getContentArea()
+    if not area or not Properties._scroll then return end
+    Properties._area = area
+    Properties._scroll:setPosition(area.x, area.y)
+    Properties:_layout()
+end
+
 function Properties.cleanup()
     for _, c in ipairs(Properties._conns) do pcall(function() c.Disconnect(c) end) end
     Properties._conns = {}

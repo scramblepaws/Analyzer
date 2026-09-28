@@ -128,6 +128,16 @@ function Spy.init()
     print("[Analyzer] RemoteSpy initialized")
 end
 
+function Spy.move()
+    local area = UI.MainWindow.getContentArea()
+    if not area or not Spy._block then return end
+    Spy._filterBox:setPosition(area.x + 8, area.y + 4)
+    Spy._pauseBtn:setPosition(area.x + area.width - 244, area.y + 4)
+    Spy._clearBtn:setPosition(area.x + area.width - 166, area.y + 4)
+    Spy._copyBtn:setPosition(area.x + area.width - 88, area.y + 4)
+    Spy._block:setPosition(area.x, area.y + 34)
+end
+
 function Spy.cleanup()
     for _, c in ipairs(Spy._conns) do pcall(function() c.Disconnect(c) end) end
     Spy._conns = {}

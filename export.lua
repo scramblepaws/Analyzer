@@ -154,6 +154,17 @@ function Export.init()
     print("[Analyzer] Export initialized")
 end
 
+function Export.move()
+    local area = UI.MainWindow.getContentArea()
+    if not area or not Export._label then return end
+    Export._label:setPosition(area.x + 8, area.y + 8)
+    local y = area.y + 36
+    for _, b in ipairs(Export._btns or {}) do
+        b:setPosition(area.x + 8, y)
+        y = y + 34
+    end
+end
+
 function Export.cleanup()
     for _, c in ipairs(Export._conns or {}) do pcall(function() c.Disconnect(c) end) end
     Export._conns = {}

@@ -1406,6 +1406,18 @@ function TextBlock:onScroll(delta)
     self:_renderVisibleLines()
 end
 
+function TextBlock:redraw()
+    if self._bg then
+        self._bg:_updateAbsolutePosition()
+        self._bg:redraw()
+    end
+    if self._gutterBg then
+        self._gutterBg.Position = Vector2.new(self._absX, self._absY)
+        self._gutterBg.Size = Vector2.new(self._gutterWidth, self._height)
+    end
+    self:_renderVisibleLines()
+end
+
 function TextBlock:setVisible(visible)
     self._visible = visible
     self._bg:setVisible(visible)
@@ -1711,6 +1723,17 @@ function TextInput:clear()
     if self._onChange then self._onChange("") end
 end
 
+function TextInput:redraw()
+    if self._bgRect then
+        self._bgRect:_updateAbsolutePosition()
+        self._bgRect:redraw()
+    end
+    if self._textObj then
+        self._textObj.Position = Vector2.new(self._absX + UI.Theme.Padding, self._absY + 3)
+    end
+    self:_updateDisplay()
+end
+
 function TextInput:setVisible(visible)
     self._visible = visible
     self._bgRect:setVisible(visible)
@@ -1853,32 +1876,37 @@ local _mainWindow = nil
 local _sections = nil -- Sections shim (registerContent/switchTab API the modules use)
 UI._chrome = {} -- window furniture toggled together
 
-function MainWindow.create()
-    local vw, vh = UI.getViewport()
-    -- ponytail: shrink margin on small screens so content stays usable
-    local margin = vw < 900 and 10 or UI.Theme.WindowMargin
-    
-    local winX = margin
-    local winY = margin
-    local winW = vw - margin * 2
-    local winH = vh - margin * 2
+function MainWindow.layoutAreas()
+    local pad = 8
     local menuH = UI.Theme.MenuHeight
     local headH = UI.Theme.PaneHeadHeight
-    local pad = 8
-    local treeW = math.max(200, math.floor(winW * 0.34))
-    local paneTop = winY + UI.Theme.TitleBarHeight + 1 + menuH + 1
-    local paneH = winY + winH - paneTop
+    local treeW = math.max(200, math.floor(UI._windowW * 0.34))
+    local paneTop = UI._windowY + UI.Theme.TitleBarHeight + 1 + menuH + 1
+    local paneH = UI._windowY + UI._windowH - paneTop
+    UI._treeW, UI._paneTop, UI._paneH = treeW, paneTop, paneH
+    UI._treeArea = {x = UI._windowX + pad, y = paneTop + headH, width = treeW - pad * 2, height = paneH - headH}
+    UI._contentArea = {x = UI._windowX + treeW + pad, y = paneTop + headH, width = UI._windowW - treeW - pad * 2, height = paneH - headH}
+end
+
+function MainWindow.create()
+    local vw, vh = UI.getViewport()
+    -- ponytail: compact floating window, centered; tiny screens fall back to margins
+    local winW, winH = 880, 560
+    if vw < 920 then winW = vw - 20 end
+    if vh < 600 then winH = vh - 20 end
+    local winX, winY = math.floor((vw - winW) / 2), math.floor((vh - winH) / 2)
     
     -- Store dimensions globally
     UI._windowX = winX
     UI._windowY = winY
     UI._windowW = winW
     UI._windowH = winH
-    UI._treeArea = {x = winX + pad, y = paneTop + headH, width = treeW - pad * 2, height = paneH - headH}
-    UI._contentArea = {x = winX + treeW + pad, y = paneTop + headH, width = winW - treeW - pad * 2, height = paneH - headH}
+    MainWindow.layoutAreas()
+    local menuH, headH, pad = UI.Theme.MenuHeight, UI.Theme.PaneHeadHeight, 8
+    local treeW, paneTop, paneH = UI._treeW, UI._paneTop, UI._paneH
     UI._chrome = {}
     UI._titleBarBg, UI._titleText, UI._statsText, UI._titleBorder = nil, nil, nil, nil
-    UI._menuBar, UI._sectionLabel, UI._contentFlash = nil, nil, nil
+    UI._menuBar, UI._sectionLabel, UI._contentFlash, UI._dragHandle = nil, nil, nil, nil
     
     -- Drop shadow (single offset layer, no rounded edges anywhere)
     table.insert(UI._chrome, UI.shadow(winX, winY, winW, winH, 99))
@@ -1947,6 +1975,20 @@ function MainWindow.create()
     UI._titleBorder = titleBorder
     table.insert(UI._chrome, titleBorder)
     
+    -- Title drag handle (invisible, topmost in title strip; drag moves whole window)
+    local dragHandle = Rect.new({
+        x = winX, y = winY, width = winW, height = UI.Theme.TitleBarHeight,
+        fillColor = UI.Theme.Background, borderThickness = 0, transparency = 0,
+        zIndex = 115,
+    })
+    dragHandle._draggable = true
+    dragHandle.onDrag = function(_, p)
+        UI.moveWindowTo(math.floor(p.X), math.floor(p.Y))
+    end
+    dragHandle:setVisible(false)
+    Input.register(dragHandle)
+    UI._dragHandle = dragHandle
+
     -- Section menu (flat tabs + one shared sliding magenta bar)
     local menuY = winY + UI.Theme.TitleBarHeight + 1
     local sectionNames = {"Properties", "Scripts", "Remote Spy", "Export"}
@@ -2058,6 +2100,7 @@ function MainWindow.setVisible(visible)
     if _sections then
         for _, tab in pairs(_sections._tabs) do tab:setVisible(visible) end
     end
+    if UI._dragHandle then UI._dragHandle:setVisible(visible) end
     if UI._statsText and visible then
         local stats = Pool.getStats()
         UI._statsText.Text = string.format("Drawing: %d active / %d pooled", stats.active, stats.pooled)
@@ -2065,6 +2108,33 @@ function MainWindow.setVisible(visible)
     if _sections and _sections._activeTab then
         -- ponytail: re-fire so modules refresh their pooled rows on toggle
         pcall(function() Analyzer.Signals.TabChanged:Fire(_sections._activeTab, nil) end)
+    end
+end
+
+-- ponytail: drag = reposition chrome + re-anchor modules; no rebuild, no state loss
+function UI.moveWindowTo(nx, ny)
+    if not _mainWindow then return end
+    local vw, vh = UI.getViewport()
+    nx = math.max(-UI._windowW + 120, math.min(nx, vw - 120))
+    ny = math.max(0, math.min(ny, vh - 40))
+    local dx, dy = nx - UI._windowX, ny - UI._windowY
+    if dx == 0 and dy == 0 then return end
+    UI._windowX, UI._windowY = nx, ny
+    MainWindow.layoutAreas()
+    local d = Vector2.new(dx, dy)
+    for _, o in ipairs(UI._chrome or {}) do
+        pcall(function() o.Position = o.Position + d end)
+    end
+    _mainWindow:setPosition(nx, ny)
+    if UI._dragHandle then UI._dragHandle:setPosition(nx, ny) end
+    if _sections then
+        for _, tab in pairs(_sections._tabs) do
+            tab:setPosition(tab._x + dx, tab._y + dy)
+        end
+    end
+    for _, m in ipairs({"Explorer", "Properties", "ScriptViewer", "RemoteSpy", "Export"}) do
+        local mod = Analyzer[m]
+        if mod and mod.move then pcall(mod.move, mod) end
     end
 end
 
@@ -2154,6 +2224,7 @@ function UI.cleanup()
     
     _mainWindow = nil
     _sections = nil
+    UI._dragHandle = nil
 end
 
 return UI

@@ -144,6 +144,16 @@ function Explorer.init()
     print("[Analyzer] Explorer initialized")
 end
 
+function Explorer.move()
+    local area = UI.MainWindow.getTreeArea()
+    if not area or not Explorer._scroll then return end
+    Explorer._search:setPosition(area.x, area.y)
+    Explorer._refreshBtn:setPosition(area.x + area.width - 80, area.y)
+    Explorer._scroll:setPosition(area.x, area.y + 28)
+    Explorer._area = {x = area.x, y = area.y + 28, width = area.width, height = area.height - 28}
+    Explorer:_layout()
+end
+
 function Explorer.cleanup()
     for _, c in ipairs(Explorer._conns) do pcall(function() c.Disconnect(c) end) end
     Explorer._conns = {}
