@@ -99,19 +99,24 @@ function Export.dumpGame()
 end
 
 function Export.init()
-    local area = UI.MainWindow.getContentArea()
+    -- ponytail: v2 — tops parented to content pane (relative); cascade moves them
+    local pane = UI.MainWindow.getContentPane()
+    local box = UI._contentArea
     local tabs = UI.MainWindow.getTabContainer()
-    local holder = UI.Widget.new({x = area.x, y = area.y, width = area.width, height = area.height, zIndex = 115})
+    local holder = UI.Widget.new({x = 0, y = 0, width = box.width, height = box.height, zIndex = 115})
     holder.redraw = function() end
-    Export._label = UI.Label.new({x = area.x + 8, y = area.y + 8, text = "Export tools",
+    if pane then pane:addChild(holder) end
+    Export._label = UI.Label.new({x = 8, y = 8, text = "Export tools",
         textColor = UI.Theme.Text, zIndex = 121})
-    local y = area.y + 36
+    if pane then pane:addChild(Export._label) end
+    local y = 36
     Export._btns = {}
     local function btn(text, fn)
-        local b = UI.Button.new({x = area.x + 8, y = y, width = 220, height = 28,
+        local b = UI.Button.new({x = 8, y = y, width = 220, height = 28,
             text = text, zIndex = 121, onClick = fn})
         y = y + 34
         table.insert(Export._btns, b)
+        if pane then pane:addChild(b) end
         return b
     end
     btn("Save Full Game (saveinstance)", function()
@@ -152,17 +157,6 @@ function Export.init()
         for _, b in ipairs(Export._btns or {}) do b:setVisible(show) end
     end))
     print("[Analyzer] Export initialized")
-end
-
-function Export.move()
-    local area = UI.MainWindow.getContentArea()
-    if not area or not Export._label then return end
-    Export._label:setPosition(area.x + 8, area.y + 8)
-    local y = area.y + 36
-    for _, b in ipairs(Export._btns or {}) do
-        b:setPosition(area.x + 8, y)
-        y = y + 34
-    end
 end
 
 function Export.cleanup()

@@ -62,13 +62,17 @@ function SV:view(inst)
 end
 
 function SV.init()
-    local area = UI.MainWindow.getContentArea()
+    -- ponytail: v2 — tops parented to content pane (relative); cascade moves them
+    local pane = UI.MainWindow.getContentPane()
+    local box = UI._contentArea
+    local w, h = box.width, box.height
     local tabs = UI.MainWindow.getTabContainer()
-    local holder = UI.Widget.new({x = area.x, y = area.y, width = area.width, height = area.height, zIndex = 115})
+    local holder = UI.Widget.new({x = 0, y = 0, width = w, height = h, zIndex = 115})
     holder.redraw = function() end
-    SV._path = UI.Label.new({x = area.x + 8, y = area.y + 4, text = "No script selected",
+    if pane then pane:addChild(holder) end
+    SV._path = UI.Label.new({x = 8, y = 4, text = "No script selected",
         textColor = UI.Theme.Accent, zIndex = 121})
-    SV._copy = UI.Button.new({x = area.x + area.width - 88, y = area.y + 2, width = 80, height = 24,
+    SV._copy = UI.Button.new({x = w - 88, y = 2, width = 80, height = 24,
         text = "Copy", zIndex = 121, onClick = function()
             local sc = getgenv().setclipboard
             if type(sc) == "function" and SV._block._lines then
@@ -76,8 +80,13 @@ function SV.init()
                 UI.Notification.show("Copied", 1)
             end
         end})
-    SV._block = UI.TextBlock.new({x = area.x, y = area.y + 30, width = area.width,
-        height = area.height - 30, zIndex = 120, tokenizer = tokenize, maxSegments = 8})
+    SV._block = UI.TextBlock.new({x = 0, y = 30, width = w,
+        height = h - 30, zIndex = 120, tokenizer = tokenize, maxSegments = 8})
+    if pane then
+        pane:addChild(SV._path)
+        pane:addChild(SV._copy)
+        pane:addChild(SV._block)
+    end
     tabs:registerContent("Scripts", holder)
     table.insert(SV._conns, Analyzer.Signals.ScriptRequested:Connect(function(inst)
         if inst and inst:IsA("LuaSourceContainer") then
@@ -95,13 +104,7 @@ function SV.init()
     print("[Analyzer] ScriptViewer initialized")
 end
 
-function SV.move()
-    local area = UI.MainWindow.getContentArea()
-    if not area or not SV._block then return end
-    SV._path:setPosition(area.x + 8, area.y + 4)
-    SV._copy:setPosition(area.x + area.width - 88, area.y + 2)
-    SV._block:setPosition(area.x, area.y + 30)
-end
+function SV.cleanup()
 
 function SV.cleanup()
     for _, c in ipairs(SV._conns) do pcall(function() c.Disconnect(c) end) end

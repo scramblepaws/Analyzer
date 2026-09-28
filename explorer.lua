@@ -30,8 +30,10 @@ local function hasKids(inst)
 end
 
 function Explorer:_layout()
-    local area = self._area
-    if not area then return end
+    -- ponytail: v2 — box read live from layout authority every pass, never stored
+    local box = UI._treeArea
+    if not box or not self._scroll then return end
+    local area = {x = box.x, y = box.y + 28, width = box.width, height = box.height - 28}
     local show = Analyzer._visible and self._tabActive
     local f = self._filter or ""
     local y = area.y - self._scroll._scrollOffset
@@ -61,8 +63,9 @@ function Explorer:_insertChildren(parentRow, parentNode)
     for i, row in ipairs(self._nodes) do if row.node == parentNode then idx = i break end end
     for j = #kids, 1, -1 do -- insert in order after parent
         local child = kids[j]
+        local w = (UI._treeArea and UI._treeArea.width or 300) - 8
         local node = UI.TreeNode.new({
-            x = 0, y = 0, width = self._area.width - 8, height = UI.Theme.LineHeight,
+            x = 0, y = 0, width = w, height = UI.Theme.LineHeight,
             instance = child, text = child.Name, depth = parentRow.depth + 1,
             className = child.ClassName, hasChildren = hasKids(child),
             zIndex = 120,
@@ -101,10 +104,11 @@ function Explorer:refresh()
     for _, row in ipairs(self._nodes) do pcall(function() row.node:destroy() end) end
     self._nodes = {}
     self._selected = nil
-    if not self._area then return end
+    local box = UI._treeArea
+    if not box then return end
     for _, root in ipairs(getRoots()) do
         local node = UI.TreeNode.new({
-            x = 0, y = 0, width = self._area.width - 8, height = UI.Theme.LineHeight,
+            x = 0, y = 0, width = box.width - 8, height = UI.Theme.LineHeight,
             instance = root, text = root.Name, depth = 0,
             className = root.ClassName, hasChildren = hasKids(root), zIndex = 120,
             onSelect = function(n) self:select(n._instance, n) end,
@@ -117,21 +121,27 @@ function Explorer:refresh()
 end
 
 function Explorer.init()
-    local area = UI.MainWindow.getTreeArea()
-    Explorer._area = area
+    -- ponytail: v2 — tops parented to tree pane with RELATIVE coords; cascade moves them
+    local pane = UI.MainWindow.getTreePane()
+    local box = UI._treeArea
     local tabs = UI.MainWindow.getTabContainer()
-    local holder = UI.Widget.new({x = area.x, y = area.y, width = area.width, height = area.height, zIndex = 115})
+    local holder = UI.Widget.new({x = 0, y = 0, width = box.width, height = box.height, zIndex = 115})
     holder.redraw = function() end
+    if pane then pane:addChild(holder) end
     Explorer._holder = holder
-    Explorer._search = UI.TextInput.new({x = area.x, y = area.y, width = area.width - 90, height = 24,
+    Explorer._search = UI.TextInput.new({x = 0, y = 0, width = box.width - 90, height = 24,
         placeholder = "Filter by name...", zIndex = 121,
         onChange = function(t) Explorer._filter = t:lower() Explorer:_layout() end})
-    Explorer._refreshBtn = UI.Button.new({x = area.x + area.width - 80, y = area.y, width = 80, height = 24,
+    Explorer._refreshBtn = UI.Button.new({x = box.width - 80, y = 0, width = 80, height = 24,
         text = "Refresh", zIndex = 121, onClick = function() Explorer:refresh() end})
-    Explorer._scroll = UI.ScrollContainer.new({x = area.x, y = area.y + 28, width = area.width,
-        height = area.height - 28, zIndex = 120, itemHeight = UI.Theme.LineHeight,
+    Explorer._scroll = UI.ScrollContainer.new({x = 0, y = 28, width = box.width,
+        height = box.height - 28, zIndex = 120, itemHeight = UI.Theme.LineHeight,
         onScroll = function() Explorer:_layout() end})
-    Explorer._area = {x = area.x, y = area.y + 28, width = area.width, height = area.height - 28}
+    if pane then
+        pane:addChild(Explorer._search)
+        pane:addChild(Explorer._refreshBtn)
+        pane:addChild(Explorer._scroll)
+    end
     tabs:registerContent("Explorer", holder)
     -- show/hide with tab: hook visibility via TabChanged
     table.insert(Explorer._conns, Analyzer.Signals.TabChanged:Connect(function(name)
@@ -145,12 +155,7 @@ function Explorer.init()
 end
 
 function Explorer.move()
-    local area = UI.MainWindow.getTreeArea()
-    if not area or not Explorer._scroll then return end
-    Explorer._search:setPosition(area.x, area.y)
-    Explorer._refreshBtn:setPosition(area.x + area.width - 80, area.y)
-    Explorer._scroll:setPosition(area.x, area.y + 28)
-    Explorer._area = {x = area.x, y = area.y + 28, width = area.width, height = area.height - 28}
+    -- ponytail: v2 — tops ride the pane cascade; only flat rows need relayout
     Explorer:_layout()
 end
 

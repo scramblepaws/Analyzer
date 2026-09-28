@@ -94,26 +94,37 @@ function Spy:start()
 end
 
 function Spy.init()
-    local area = UI.MainWindow.getContentArea()
+    -- ponytail: v2 — tops parented to content pane (relative); cascade moves them
+    local pane = UI.MainWindow.getContentPane()
+    local box = UI._contentArea
+    local w, h = box.width, box.height
     local tabs = UI.MainWindow.getTabContainer()
-    local holder = UI.Widget.new({x = area.x, y = area.y, width = area.width, height = area.height, zIndex = 115})
+    local holder = UI.Widget.new({x = 0, y = 0, width = w, height = h, zIndex = 115})
     holder.redraw = function() end
-    Spy._filterBox = UI.TextInput.new({x = area.x + 8, y = area.y + 4, width = area.width - 260,
+    if pane then pane:addChild(holder) end
+    Spy._filterBox = UI.TextInput.new({x = 8, y = 4, width = w - 260,
         height = 24, placeholder = "Filter...", zIndex = 121,
         onChange = function(t) Spy._filter = t Spy:_render() end})
-    Spy._pauseBtn = UI.Button.new({x = area.x + area.width - 244, y = area.y + 4, width = 70, height = 24,
+    Spy._pauseBtn = UI.Button.new({x = w - 244, y = 4, width = 70, height = 24,
         text = "Pause", zIndex = 121, onClick = function(selfBtn)
             Spy._paused = not Spy._paused selfBtn:setText(Spy._paused and "Resume" or "Pause") end})
-    Spy._clearBtn = UI.Button.new({x = area.x + area.width - 166, y = area.y + 4, width = 70, height = 24,
+    Spy._clearBtn = UI.Button.new({x = w - 166, y = 4, width = 70, height = 24,
         text = "Clear", zIndex = 121, onClick = function() Spy._log = {} Spy:_render() end})
-    Spy._copyBtn = UI.Button.new({x = area.x + area.width - 88, y = area.y + 4, width = 80, height = 24,
+    Spy._copyBtn = UI.Button.new({x = w - 88, y = 4, width = 80, height = 24,
         text = "Copy", zIndex = 121, onClick = function()
             local sc = getgenv().setclipboard
             if type(sc) == "function" then pcall(sc, table.concat((function()
                 local l = {} for _, e in ipairs(Spy._log) do table.insert(l, e.path) end return l end)(), "\n")) end
         end})
-    Spy._block = UI.TextBlock.new({x = area.x, y = area.y + 34, width = area.width,
-        height = area.height - 34, zIndex = 120, showLineNumbers = false})
+    Spy._block = UI.TextBlock.new({x = 0, y = 34, width = w,
+        height = h - 34, zIndex = 120, showLineNumbers = false})
+    if pane then
+        pane:addChild(Spy._filterBox)
+        pane:addChild(Spy._pauseBtn)
+        pane:addChild(Spy._clearBtn)
+        pane:addChild(Spy._copyBtn)
+        pane:addChild(Spy._block)
+    end
     tabs:registerContent("Remote Spy", holder)
     table.insert(Spy._conns, Analyzer.Signals.TabChanged:Connect(function(name)
         local show = Analyzer._visible and name == "Remote Spy"
@@ -126,16 +137,6 @@ function Spy.init()
     Spy:start()
     Spy:_render()
     print("[Analyzer] RemoteSpy initialized")
-end
-
-function Spy.move()
-    local area = UI.MainWindow.getContentArea()
-    if not area or not Spy._block then return end
-    Spy._filterBox:setPosition(area.x + 8, area.y + 4)
-    Spy._pauseBtn:setPosition(area.x + area.width - 244, area.y + 4)
-    Spy._clearBtn:setPosition(area.x + area.width - 166, area.y + 4)
-    Spy._copyBtn:setPosition(area.x + area.width - 88, area.y + 4)
-    Spy._block:setPosition(area.x, area.y + 34)
 end
 
 function Spy.cleanup()

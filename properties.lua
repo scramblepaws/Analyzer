@@ -60,14 +60,15 @@ function Properties:show(inst)
     self:clear()
     self._current = inst
     self._tabActive = true -- ponytail: show() implies tab switch (signal is async)
-    if not inst or not self._area then return end
+    local box = UI._contentArea
+    if not inst or not box or not self._scroll then return end
     local names = propNames(inst)
-    local y0 = self._area.y - self._scroll._scrollOffset
+    local y0 = box.y - self._scroll._scrollOffset
     for i, pname in ipairs(names) do
         local ok, val = pcall(function() return inst[pname] end)
-        local item = UI.ListItem.new({x = self._area.x, y = y0 + (i-1) * UI.Theme.LineHeight,
-            width = self._area.width, height = UI.Theme.LineHeight,
-            key = pname, value = ok and serialize(val) or "—", index = i, zIndex = 120})
+        local item = UI.ListItem.new({x = box.x, y = y0 + (i-1) * UI.Theme.LineHeight,
+            width = box.width, height = UI.Theme.LineHeight,
+            key = pname, value = ok and serialize(val) or "-", index = i, zIndex = 120})
         item:setVisible(Analyzer._visible)
         table.insert(self._items, item)
         -- live update; disconnect all on next show() (prevents leaks)
@@ -85,25 +86,29 @@ function Properties:show(inst)
 end
 
 function Properties:_layout()
-    if not self._area then return end
+    local box = UI._contentArea
+    if not box or not self._scroll then return end
     local show = Analyzer._visible and self._tabActive
-    local y = self._area.y - self._scroll._scrollOffset
+    local y = box.y - self._scroll._scrollOffset
     for _, it in ipairs(self._items) do
-        it:updatePosition(self._area.x, y)
-        it:setVisible(show and y >= self._area.y - 20 and y < self._area.y + self._area.height)
+        it:updatePosition(box.x, y)
+        it:setVisible(show and y >= box.y - 20 and y < box.y + box.height)
         y = y + UI.Theme.LineHeight
     end
 end
 
 function Properties.init()
-    local area = UI.MainWindow.getContentArea()
-    Properties._area = area
+    -- ponytail: v2 — scroll parented to content pane (relative); rows stay flat
+    local pane = UI.MainWindow.getContentPane()
+    local box = UI._contentArea
     local tabs = UI.MainWindow.getTabContainer()
-    local holder = UI.Widget.new({x = area.x, y = area.y, width = area.width, height = area.height, zIndex = 115})
+    local holder = UI.Widget.new({x = 0, y = 0, width = box.width, height = box.height, zIndex = 115})
     holder.redraw = function() end
-    Properties._scroll = UI.ScrollContainer.new({x = area.x, y = area.y, width = area.width,
-        height = area.height, zIndex = 120, itemHeight = UI.Theme.LineHeight,
+    if pane then pane:addChild(holder) end
+    Properties._scroll = UI.ScrollContainer.new({x = 0, y = 0, width = box.width,
+        height = box.height, zIndex = 120, itemHeight = UI.Theme.LineHeight,
         onScroll = function() Properties:_layout() end})
+    if pane then pane:addChild(Properties._scroll) end
     tabs:registerContent("Properties", holder)
     table.insert(Properties._conns, Analyzer.Signals.InstanceSelected:Connect(function(inst)
         tabs:switchTab("Properties")
@@ -118,10 +123,7 @@ function Properties.init()
 end
 
 function Properties.move()
-    local area = UI.MainWindow.getContentArea()
-    if not area or not Properties._scroll then return end
-    Properties._area = area
-    Properties._scroll:setPosition(area.x, area.y)
+    -- ponytail: v2 — scroll rides the pane cascade; only flat rows need relayout
     Properties:_layout()
 end
 

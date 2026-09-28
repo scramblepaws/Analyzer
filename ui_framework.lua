@@ -104,21 +104,6 @@ function UI.lerpColor(a, b, t)
         a.B + (b.B - a.B) * t)
 end
 
-function UI.shadow(x, y, w, h, zIndex)
-    -- ponytail: UI.Pool (not bare Pool) — this helper is defined before
-    -- `local Pool`, and some executors only bind earlier-declared locals
-    local s = UI.Pool.get("Square")
-    s.Size = Vector2.new(w, h)
-    s.Position = Vector2.new(x + 5, y + 6)
-    s.Color = Color3.fromRGB(0, 0, 0)
-    s.Filled = true
-    s.Thickness = 0
-    s.Transparency = 0.7
-    s.ZIndex = zIndex
-    s.Visible = false
-    table.insert(Analyzer._drawingObjects, s)
-    return s
-end
 
 UI.Theme = {
     Background    = Color3.fromRGB(11, 14, 23),
@@ -467,7 +452,7 @@ function Widget:setPosition(x, y)
     self._x = x
     self._y = y
     self:_updateAbsolutePosition()
-    self:redraw()
+    self:redrawSubtree()
 end
 
 function Widget:_updateAbsolutePosition()
@@ -503,6 +488,7 @@ function Widget:addChild(child)
     child._parent = self
     table.insert(self._children, child)
     child:_updateAbsolutePosition()
+    child:redrawSubtree()
 end
 
 function Widget:removeChild(child)
@@ -532,6 +518,14 @@ function Widget:redraw()
     -- Override in subclasses
 end
 
+-- ponytail: the whole point of v2 — one call repositions an entire subtree
+function Widget:redrawSubtree()
+    self:redraw()
+    for _, child in ipairs(self._children) do
+        child:redrawSubtree()
+    end
+end
+
 UI.Widget = Widget
 
 ----------------------------------------------------------------------
@@ -546,8 +540,10 @@ function Rect.new(props)
     
     self._fillColor = props.fillColor or UI.Theme.Surface
     self._borderColor = props.borderColor or UI.Theme.Border
-    self._borderThickness = props.borderThickness or 1
-    self._transparency = props.transparency or 1
+    self._borderThickness = props.borderThickness or 0
+    -- ponytail: explicit nil check — transparency 0 (invisible) is falsy but valid
+    self._transparency = props.transparency
+    if self._transparency == nil then self._transparency = 1 end
     
     -- Create drawing objects
     self._bg = Pool.get("Square")
@@ -1843,38 +1839,34 @@ local MainWindow = {}
 UI.MainWindow = MainWindow
 
 -- ponytail: one-liner chrome squares/text (bars, ticks, dividers, headers)
-local function chromeSquare(x, y, w, h, color, z)
-    local o = Pool.get("Square")
-    o.Size = Vector2.new(w, h)
-    o.Position = Vector2.new(x, y)
-    o.Color = color
-    o.Filled = true
-    o.Thickness = 0
-    o.Transparency = 1
-    o.ZIndex = z
-    o.Visible = false
-    table.insert(Analyzer._drawingObjects, o)
-    table.insert(UI._chrome, o)
-    return o
-end
 
-local function chromeText(text, x, y, color, size, z)
-    local o = Pool.get("Text")
-    o.Text = text
-    o.Position = Vector2.new(x, y)
-    o.Color = color
-    o.Size = size
-    o.Font = 2
-    o.ZIndex = z
-    o.Visible = false
-    table.insert(Analyzer._drawingObjects, o)
-    table.insert(UI._chrome, o)
-    return o
-end
-
-local _mainWindow = nil
+local _mainWindow = nil -- v2: window ROOT; drag = one setPosition, cascaded
 local _sections = nil -- Sections shim (registerContent/switchTab API the modules use)
-UI._chrome = {} -- window furniture toggled together
+local _treePane = nil -- v2: modules parent content here and read boxes, never pixels
+local _contentPane = nil
+
+-- ponytail: v2 chrome primitives — parented, relative coords, cascade for free
+local function chromeRect(parent, x, y, w, h, color, z, opts)
+    opts = opts or {}
+    local r = Rect.new({
+        x = x, y = y, width = w, height = h,
+        fillColor = color, borderColor = opts.border or color,
+        borderThickness = opts.border and 1 or 0,
+        transparency = opts.transparency or 1, zIndex = z,
+        interactive = false,
+    })
+    parent:addChild(r)
+    return r
+end
+
+local function chromeLabel(parent, text, x, y, color, size, z)
+    local l = Label.new({
+        x = x, y = y, text = text, textColor = color, fontSize = size,
+        zIndex = z, interactive = false,
+    })
+    parent:addChild(l)
+    return l
+end
 
 function MainWindow.layoutAreas()
     local pad = 8
@@ -1904,100 +1896,53 @@ function MainWindow.create()
     MainWindow.layoutAreas()
     local menuH, headH, pad = UI.Theme.MenuHeight, UI.Theme.PaneHeadHeight, 8
     local treeW, paneTop, paneH = UI._treeW, UI._paneTop, UI._paneH
-    UI._chrome = {}
-    UI._titleBarBg, UI._titleText, UI._statsText, UI._titleBorder = nil, nil, nil, nil
-    UI._menuBar, UI._sectionLabel, UI._contentFlash, UI._dragHandle = nil, nil, nil, nil
+    _mainWindow = Widget.new({x = winX, y = winY, width = winW, height = winH, zIndex = 99, interactive = false})
+    UI._titleText, UI._statsText = nil, nil
+    UI._menuBar, UI._sectionLabel, UI._titlePulse, UI._flashBg, UI._dragHandle = nil, nil, nil, nil, nil
+    UI._treePane, UI._contentPane = nil, nil
     
     -- Drop shadow (single offset layer, no rounded edges anywhere)
-    table.insert(UI._chrome, UI.shadow(winX, winY, winW, winH, 99))
+    chromeRect(_mainWindow, 5, 6, winW, winH, Color3.fromRGB(0, 0, 0), 98, {transparency = 0.7})
 
-    -- Window background
-    _mainWindow = Rect.new({
-        x = winX,
-        y = winY,
-        width = winW,
-        height = winH,
-        fillColor = UI.Theme.Background,
-        borderColor = UI.Theme.Border,
-        borderThickness = 1,
-        zIndex = 100,
-    })
+    -- Window background (root child; border via opts)
+    chromeRect(_mainWindow, 0, 0, winW, winH, UI.Theme.Background, 100, {border = UI.Theme.Border})
     
-    -- Title bar
-    local titleBarBg = Pool.get("Square")
-    titleBarBg.Size = Vector2.new(winW, UI.Theme.TitleBarHeight)
-    titleBarBg.Position = Vector2.new(winX, winY)
-    titleBarBg.Color = UI.Theme.Surface
-    titleBarBg.Filled = true
-    titleBarBg.Thickness = 0
-    titleBarBg.ZIndex = 101
-    titleBarBg.Visible = false
-    table.insert(Analyzer._drawingObjects, titleBarBg)
-    UI._titleBarBg = titleBarBg
-    table.insert(UI._chrome, titleBarBg)
+    -- Title strip (node; children relative)
+    local titleBar = Widget.new({x = 0, y = 0, width = winW, height = UI.Theme.TitleBarHeight, interactive = false})
+    _mainWindow:addChild(titleBar)
+    chromeRect(titleBar, 0, 0, winW, UI.Theme.TitleBarHeight, UI.Theme.Surface, 101)
     
-    -- Title text
-    local titleText = Pool.get("Text")
-    titleText.Text = "// " .. string.upper(Analyzer._name) .. " v" .. Analyzer._version
-    titleText.Position = Vector2.new(winX + UI.Theme.Padding, winY + 6)
-    titleText.Color = UI.Theme.Accent
-    titleText.Size = UI.Theme.FontSize
-    titleText.Font = 2
-    titleText.ZIndex = 102
-    titleText.Visible = false
-    table.insert(Analyzer._drawingObjects, titleText)
-    UI._titleText = titleText
-    table.insert(UI._chrome, titleText)
+    UI._titleText = chromeLabel(titleBar, "// " .. string.upper(Analyzer._name) .. " v" .. Analyzer._version, UI.Theme.Padding, 6, UI.Theme.Accent, UI.Theme.FontSize, 102)
     
-    -- Pool stats text (top right)
-    local statsText = Pool.get("Text")
-    statsText.Text = ""
-    statsText.Position = Vector2.new(winX + winW - 200, winY + 6)
-    statsText.Color = UI.Theme.TextDark
-    statsText.Size = UI.Theme.SmallFontSize
-    statsText.Font = 2
-    statsText.ZIndex = 102
-    statsText.Visible = false
-    table.insert(Analyzer._drawingObjects, statsText)
-    UI._statsText = statsText
-    table.insert(UI._chrome, statsText)
+    UI._statsText = chromeLabel(titleBar, "", winW - 200, 6, UI.Theme.TextDark, UI.Theme.SmallFontSize, 102)
     
-    -- Title bar border bottom
-    local titleBorder = Pool.get("Square")
-    titleBorder.Size = Vector2.new(winW, 1)
-    titleBorder.Position = Vector2.new(winX, winY + UI.Theme.TitleBarHeight)
-    titleBorder.Color = UI.Theme.Accent
-    titleBorder.Filled = true
-    titleBorder.Thickness = 0
-    titleBorder.ZIndex = 101
-    titleBorder.Visible = false
-    table.insert(Analyzer._drawingObjects, titleBorder)
-    UI._titleBorder = titleBorder
-    table.insert(UI._chrome, titleBorder)
+    local titleAccent = chromeRect(titleBar, 0, UI.Theme.TitleBarHeight, winW, 1, UI.Theme.Accent, 101)
+    UI._titlePulse = titleAccent._bg
     
-    -- Title drag handle (invisible, topmost in title strip; drag moves whole window)
+    -- Title drag handle (invisible child; drag = root.setPosition, cascaded)
     local dragHandle = Rect.new({
-        x = winX, y = winY, width = winW, height = UI.Theme.TitleBarHeight,
+        x = 0, y = 0, width = winW, height = UI.Theme.TitleBarHeight,
         fillColor = UI.Theme.Background, borderThickness = 0, transparency = 0,
-        zIndex = 115,
+        zIndex = 115, interactive = true,
     })
+    titleBar:addChild(dragHandle)
     dragHandle._draggable = true
     dragHandle.onDrag = function(_, p)
         UI.moveWindowTo(math.floor(p.X), math.floor(p.Y))
     end
-    dragHandle:setVisible(false)
     Input.register(dragHandle)
     UI._dragHandle = dragHandle
 
-    -- Section menu (flat tabs + one shared sliding magenta bar)
-    local menuY = winY + UI.Theme.TitleBarHeight + 1
+    -- Section menu (node; tabs relative, one shared sliding magenta bar)
+    local menuNode = Widget.new({x = 0, y = UI.Theme.TitleBarHeight + 1, width = winW, height = menuH, interactive = false})
+    _mainWindow:addChild(menuNode)
     local sectionNames = {"Properties", "Scripts", "Remote Spy", "Export"}
     local tabW = math.floor(winW / #sectionNames)
     _sections = { _tabs = {}, _contentPanels = {}, _activeTab = nil }
     for i, sname in ipairs(sectionNames) do
         local tab = Tab.new({
-            x = winX + (i - 1) * tabW,
-            y = menuY,
+            x = (i - 1) * tabW,
+            y = 0,
             width = tabW,
             height = menuH,
             text = string.upper(sname),
@@ -2006,33 +1951,37 @@ function MainWindow.create()
             zIndex = 110,
             onClick = function() _sections:switchTab(sname) end,
         })
+        menuNode:addChild(tab)
         _sections._tabs[sname] = tab
     end
-    chromeSquare(winX, menuY + menuH - 1, winW, 1, UI.Theme.Border, 109)
-    UI._menuBar = chromeSquare(winX, menuY + menuH - 2, tabW, 2, UI.Theme.Magenta, 111)
+    chromeRect(menuNode, 0, menuH - 1, winW, 1, UI.Theme.Border, 109)
+    UI._menuBar = chromeRect(menuNode, 0, menuH - 2, tabW, 2, UI.Theme.Magenta, 111)
 
-    -- Left pane header (explorer) + divider + right pane header
-    chromeSquare(winX, paneTop, treeW, headH, UI.Theme.Surface, 105)
-    chromeSquare(winX, paneTop, 3, headH, UI.Theme.Accent, 106)
-    chromeText("// EXPLORER", winX + 10, paneTop + 4, UI.Theme.TextDim, UI.Theme.SmallFontSize, 106)
-    chromeSquare(winX + treeW, paneTop, 1, paneH, UI.Theme.BorderLight, 105)
-    chromeSquare(winX + treeW + 1, paneTop, winW - treeW - 1, headH, UI.Theme.Surface, 105)
-    chromeSquare(winX + treeW + 1, paneTop, 3, headH, UI.Theme.Magenta, 106)
-    UI._sectionLabel = chromeText("// PROPERTIES", winX + treeW + 11, paneTop + 4, UI.Theme.Magenta, UI.Theme.SmallFontSize, 106)
+    -- Panes (nodes; P2 parents module content here, modules read boxes not pixels)
+    local treePane = Widget.new({x = 0, y = paneTop - winY, width = treeW, height = paneH, interactive = false})
+    _mainWindow:addChild(treePane)
+    _treePane = treePane
+    local contentPane = Widget.new({x = treeW + 1, y = paneTop - winY, width = winW - treeW - 1, height = paneH, interactive = false})
+    _mainWindow:addChild(contentPane)
+    _contentPane = contentPane
+    chromeRect(treePane, 0, 0, treeW, headH, UI.Theme.Surface, 105)
+    chromeRect(treePane, 0, 0, 3, headH, UI.Theme.Accent, 106)
+    chromeLabel(treePane, "// EXPLORER", 10, 4, UI.Theme.TextDim, UI.Theme.SmallFontSize, 106)
+    chromeRect(_mainWindow, treeW, paneTop - winY, 1, paneH, UI.Theme.BorderLight, 105)
+    chromeRect(contentPane, 0, 0, winW - treeW - 1, headH, UI.Theme.Surface, 105)
+    chromeRect(contentPane, 0, 0, 3, headH, UI.Theme.Magenta, 106)
+    UI._sectionLabel = chromeLabel(contentPane, "// PROPERTIES", 10, 4, UI.Theme.Magenta, UI.Theme.SmallFontSize, 106)
 
-    -- Content-switch flash frame (border-only, rests invisible)
-    local flash = Pool.get("Square")
-    flash.Size = Vector2.new(UI._contentArea.width, UI._contentArea.height)
-    flash.Position = Vector2.new(UI._contentArea.x, UI._contentArea.y)
-    flash.Color = UI.Theme.Magenta
-    flash.Filled = false
-    flash.Thickness = 1
-    flash.Transparency = 1
-    flash.ZIndex = 130
-    flash.Visible = false
-    table.insert(Analyzer._drawingObjects, flash)
-    table.insert(UI._chrome, flash)
-    UI._contentFlash = flash
+    -- Content-switch flash (tinted child; fades out, hides at rest)
+    local flash = Rect.new({
+        x = UI._contentArea.x - winX, y = UI._contentArea.y - winY,
+        width = UI._contentArea.width, height = UI._contentArea.height,
+        fillColor = UI.Theme.Magenta, borderThickness = 0, transparency = 0,
+        zIndex = 130, interactive = false,
+    })
+    _mainWindow:addChild(flash)
+    flash:setVisible(false)
+    UI._flashBg = flash._bg
 
     function _sections:switchTab(tabName)
         if self._activeTab == tabName then return end
@@ -2045,19 +1994,23 @@ function MainWindow.create()
         local tab = self._tabs[tabName]
         if tab and UI._menuBar then
             UI._menuBarSeq = (UI._menuBarSeq or 0) + 1
-            local seq, bar, fromX, toX = UI._menuBarSeq, UI._menuBar, UI._menuBar.Position.X, tab._absX
+            local seq, bar, fromX, toX = UI._menuBarSeq, UI._menuBar, UI._menuBar._x, tab._x
             UI.tween(0.14, function(t)
                 if seq ~= UI._menuBarSeq then return end
-                bar.Position = Vector2.new(fromX + (toX - fromX) * t, bar.Position.Y)
+                bar._x = fromX + (toX - fromX) * t
+                bar:_updateAbsolutePosition()
+                bar:redraw()
             end)
         end
         if UI._sectionLabel then
-            UI._sectionLabel.Text = "// " .. string.upper(tabName)
+            UI._sectionLabel:setText("// " .. string.upper(tabName))
         end
-        if UI._contentFlash and Analyzer._visible then
-            local fl = UI._contentFlash
-            fl.Visible = true
-            UI.tween(0.3, function(t) fl.Transparency = 0.2 + 0.8 * t end)
+        if UI._flashBg and Analyzer._visible then
+            UI._flashBg.Visible = true
+            UI.tween(0.25, function(t)
+                UI._flashBg.Transparency = 0.3 * (1 - t)
+                if t >= 1 then UI._flashBg.Visible = false end
+            end)
         end
         Analyzer.Signals.TabChanged:Fire(tabName, oldTab)
     end
@@ -2069,7 +2022,7 @@ function MainWindow.create()
 
     -- Accent pulse on the title line (one object, cheap heartbeat)
     UI._pulseOn = true
-    local accentLine = titleBorder
+    local accentLine = UI._titlePulse
     task.spawn(function()
         local t = 0
         while UI._pulseOn and getgenv().Analyzer ~= nil do
@@ -2091,19 +2044,13 @@ function MainWindow.create()
 end
 
 function MainWindow.setVisible(visible)
+    -- ponytail: v2 — one cascade covers chrome, tabs, drag handle, P2 module tops
     if _mainWindow then
         _mainWindow:setVisible(visible)
     end
-    for _, obj in ipairs(UI._chrome or {}) do
-        pcall(function() obj.Visible = visible end)
-    end
-    if _sections then
-        for _, tab in pairs(_sections._tabs) do tab:setVisible(visible) end
-    end
-    if UI._dragHandle then UI._dragHandle:setVisible(visible) end
     if UI._statsText and visible then
         local stats = Pool.getStats()
-        UI._statsText.Text = string.format("Drawing: %d active / %d pooled", stats.active, stats.pooled)
+        UI._statsText:setText(string.format("Drawing: %d active / %d pooled", stats.active, stats.pooled))
     end
     if _sections and _sections._activeTab then
         -- ponytail: re-fire so modules refresh their pooled rows on toggle
@@ -2111,7 +2058,7 @@ function MainWindow.setVisible(visible)
     end
 end
 
--- ponytail: drag = reposition chrome + re-anchor modules; no rebuild, no state loss
+-- ponytail: v2 drag = one root setPosition (cascade) + module row relayouts; no state loss
 function UI.moveWindowTo(nx, ny)
     if not _mainWindow then return end
     local vw, vh = UI.getViewport()
@@ -2121,17 +2068,7 @@ function UI.moveWindowTo(nx, ny)
     if dx == 0 and dy == 0 then return end
     UI._windowX, UI._windowY = nx, ny
     MainWindow.layoutAreas()
-    local d = Vector2.new(dx, dy)
-    for _, o in ipairs(UI._chrome or {}) do
-        pcall(function() o.Position = o.Position + d end)
-    end
     _mainWindow:setPosition(nx, ny)
-    if UI._dragHandle then UI._dragHandle:setPosition(nx, ny) end
-    if _sections then
-        for _, tab in pairs(_sections._tabs) do
-            tab:setPosition(tab._x + dx, tab._y + dy)
-        end
-    end
     for _, m in ipairs({"Explorer", "Properties", "ScriptViewer", "RemoteSpy", "Export"}) do
         local mod = Analyzer[m]
         if mod and mod.move then pcall(mod.move, mod) end
@@ -2148,6 +2085,15 @@ end
 
 function MainWindow.getTreeArea()
     return UI._treeArea
+end
+
+-- ponytail: v2 P2 — modules parent content widgets here, position relative
+function MainWindow.getTreePane()
+    return _treePane
+end
+
+function MainWindow.getContentPane()
+    return _contentPane
 end
 
 ----------------------------------------------------------------------
@@ -2224,6 +2170,7 @@ function UI.cleanup()
     
     _mainWindow = nil
     _sections = nil
+    _treePane, _contentPane = nil, nil
     UI._dragHandle = nil
 end
 
