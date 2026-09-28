@@ -16,7 +16,7 @@
 local CONFIG = {
     -- Set this to your GitHub raw URL base, e.g.:
     -- "https://raw.githubusercontent.com/YourUser/YourRepo/main"
-    BASE_URL = nil, -- nil = load from local workspace (for development)
+    BASE_URL = "https://raw.githubusercontent.com/scramblepaws/Analyzer/main",
     
     TOGGLE_KEY = Enum.KeyCode.RightShift,
     TRAY_ICON_RADIUS = 8,
