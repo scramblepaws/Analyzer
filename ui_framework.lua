@@ -335,20 +335,15 @@ function Input.hitTest(pos)
     return nil
 end
 
--- ponytail: single mouse source; GetMouseLocation includes topbar inset, Drawing coords don't
-function Input.mousePos()
-    local p = game:GetService("UserInputService"):GetMouseLocation()
-    pcall(function() p = p - game:GetService("GuiService"):GetGuiInset() end)
-    return p
-end
-
 function Input.setup()
     local UIS = game:GetService("UserInputService")
     
     -- Mouse move
     local moveConn = UIS.InputChanged:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseMovement then
-            Input._mousePos = Input.mousePos()
+            -- ponytail: InputObject.Position shares Drawing's coordinate space;
+            -- GetMouseLocation inset math misaligned clicks, so don't use it
+            Input._mousePos = Vector2.new(input.Position.X, input.Position.Y)
             
             -- Handle drag
             if Input._dragging and Input._dragging.onDrag then
@@ -384,7 +379,7 @@ function Input.setup()
     local clickConn = UIS.InputBegan:Connect(function(input, gameProcessed)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             Input._mouseDown = true
-            local pos = Input.mousePos()
+            local pos = Vector2.new(input.Position.X, input.Position.Y)
             local hit = Input.hitTest(pos)
             
             -- Focus management
@@ -421,7 +416,7 @@ function Input.setup()
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             Input._mouseDown = false
             
-            local pos = Input.mousePos()
+            local pos = Vector2.new(input.Position.X, input.Position.Y)
             
             if Input._dragging then
                 Input._dragging = nil
@@ -1034,7 +1029,7 @@ function TreeNode.new(props)
     
     -- Expand/collapse icon
     self._expandIcon = Pool.get("Text")
-    self._expandIcon.Text = self._hasChildren and "▶" or "  "
+    self._expandIcon.Text = self._hasChildren and "+" or "  "
     self._expandIcon.Position = Vector2.new(self._absX + indent + 2, self._absY + 2)
     self._expandIcon.Color = UI.Theme.TextDim
     self._expandIcon.Size = UI.Theme.SmallFontSize
@@ -1084,7 +1079,7 @@ end
 function TreeNode:expand()
     if self._expanded or not self._hasChildren then return end
     self._expanded = true
-    self._expandIcon.Text = "▼"
+    self._expandIcon.Text = "-"
     
     if self._onExpand then
         self._onExpand(self)
@@ -1094,7 +1089,7 @@ end
 function TreeNode:collapse()
     if not self._expanded then return end
     self._expanded = false
-    self._expandIcon.Text = "▶"
+    self._expandIcon.Text = "+"
     
     -- Destroy child nodes
     for _, child in ipairs(self._childNodes) do

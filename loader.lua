@@ -307,14 +307,6 @@ end
 ----------------------------------------------------------------------
 local function setupInput(trayX, trayY)
     local UserInputService = game:GetService("UserInputService")
-    -- ponytail: GetMouseLocation includes topbar inset; Drawing coords are absolute
-    local function mousePos()
-        local p = UserInputService:GetMouseLocation()
-        pcall(function()
-            p = p - game:GetService("GuiService"):GetGuiInset()
-        end)
-        return p
-    end
     
     -- Toggle keybind
     local toggleConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
@@ -340,7 +332,8 @@ local function setupInput(trayX, trayY)
     local clickConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
 
-        local dist = (mousePos() - Vector2.new(trayX + CONFIG.TRAY_ICON_RADIUS, trayY + CONFIG.TRAY_ICON_RADIUS)).Magnitude
+        local mp = Vector2.new(input.Position.X, input.Position.Y)
+        local dist = (mp - Vector2.new(trayX + CONFIG.TRAY_ICON_RADIUS, trayY + CONFIG.TRAY_ICON_RADIUS)).Magnitude
         
         if dist <= CONFIG.TRAY_ICON_RADIUS + 5 then
             Analyzer._visible = not Analyzer._visible
