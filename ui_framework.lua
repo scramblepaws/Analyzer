@@ -105,7 +105,9 @@ function UI.lerpColor(a, b, t)
 end
 
 function UI.shadow(x, y, w, h, zIndex)
-    local s = Pool.get("Square")
+    -- ponytail: UI.Pool (not bare Pool) — this helper is defined before
+    -- `local Pool`, and some executors only bind earlier-declared locals
+    local s = UI.Pool.get("Square")
     s.Size = Vector2.new(w, h)
     s.Position = Vector2.new(x + 5, y + 6)
     s.Color = Color3.fromRGB(0, 0, 0)

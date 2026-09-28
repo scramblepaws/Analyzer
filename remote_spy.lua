@@ -70,9 +70,12 @@ function Spy:start()
     local function handler(selfObj, ...)
         local method = ""
         if type(ncm) == "function" then local ok, m = pcall(ncm) if ok then method = m end end
+        -- ponytail: Luau rejects '...' inside a nested non-vararg closure, so
+        -- capture varargs once and unpack the table instead
+        local args, n = {...}, select("#", ...)
         if (method == "FireServer" or method == "InvokeServer")
             and (selfObj:IsA("RemoteEvent") or selfObj:IsA("RemoteFunction")) then
-            pcall(function() Spy:push("OUT", selfObj, method, ...) end)
+            pcall(function() Spy:push("OUT", selfObj, method, table.unpack(args, 1, n)) end)
         end
         return Spy._hookedFn(selfObj, ...)
     end
