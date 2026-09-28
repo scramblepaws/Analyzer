@@ -1,4 +1,176 @@
 --[[
+    Analyzer — Roblox Game Analyzer
+    Loader / Entry Point
+    
+    This is the script you execute in your UNC/SUNC-compatible executor.
+    It bootstraps the entire tool by:
+      1. Cleaning up any previous instance (re-execution safe)
+      2. Detecting available UNC/SUNC capabilities
+      3. Loading all modules from GitHub
+      4. Setting up the keybind (Right Shift) and tray icon
+]]
+
+----------------------------------------------------------------------
+-- Configuration
+----------------------------------------------------------------------
+local CONFIG = {
+    -- Set this to your GitHub raw URL base, e.g.:
+    -- "https://raw.githubusercontent.com/YourUser/YourRepo/main"
+    BASE_URL = "https://raw.githubusercontent.com/scramblepaws/Analyzer/main",
+    
+    TOGGLE_KEY = Enum.KeyCode.RightShift,
+    TRAY_ICON_RADIUS = 8,
+    TRAY_ICON_MARGIN = 20,
+    TRAY_ICON_COLOR = Color3.fromRGB(0, 162, 255),
+    
+    VERSION = "1.0.0",
+    NAME = "Analyzer",
+}
+
+----------------------------------------------------------------------
+-- Re-execution Guard & Cleanup
+----------------------------------------------------------------------
+if getgenv().Analyzer then
+    if getgenv().Analyzer._cleanup then
+        pcall(getgenv().Analyzer._cleanup)
+    end
+    getgenv().Analyzer = nil
+    task.wait(0.1)
+end
+
+----------------------------------------------------------------------
+-- Initialize Root Table
+----------------------------------------------------------------------
+local Analyzer = {
+    _version = CONFIG.VERSION,
+    _name = CONFIG.NAME,
+    _config = CONFIG,
+    _connections = {},   -- all RBXScriptConnections for cleanup
+    _drawingObjects = {}, -- all Drawing objects for cleanup
+    _loaded = false,
+    _visible = false,
+    _capabilities = {},
+}
+getgenv().Analyzer = Analyzer
+
+----------------------------------------------------------------------
+-- Capability Detection
+----------------------------------------------------------------------
+local function checkCapability(name, func)
+    local available = type(func) == "function"
+    Analyzer._capabilities[name] = available
+    return available
+end
+
+local function detectCapabilities()
+    local caps = {}
+    
+    -- Required
+    caps.Drawing = typeof(Drawing) == "table" and Drawing.new ~= nil
+    caps.getgenv = type(getgenv) == "function"
+    caps.game = typeof(game) == "Instance"
+    
+    -- Optional UNC/SUNC functions
+    local optionalFuncs = {
+        "decompile", "getscriptbytecode", "hookmetamethod",
+        "getconnections", "gethiddenproperty", "getproperties",
+        "saveinstance", "writefile", "readfile", "setclipboard",
+        "getinstances", "getnilinstances", "getcallingscript",
+        "getnamecallmethod", "newcclosure", "hookfunction",
+        "iscclosure", "checkcaller", "getinfo",
+    }
+    
+    for _, name in ipairs(optionalFuncs) do
+        local fn = getfenv()[name] or getgenv()[name]
+        if fn == nil then
+            -- Try raw global lookup
+            pcall(function()
+                fn = _G[name] or rawget(_G, name)
+            end)
+        end
+        caps[name] = type(fn) == "function"
+    end
+    
+    Analyzer._capabilities = caps
+    return caps
+end
+
+local function printBanner(caps)
+    local lines = {
+        "",
+        "╔══════════════════════════════════════════╗",
+        "║       " .. CONFIG.NAME .. " v" .. CONFIG.VERSION .. "                    ║",
+        "║       Roblox Game Analyzer              ║",
+        "╚══════════════════════════════════════════╝",
+        "",
+        "  Toggle: Right Shift | Tray: Bottom-Right",
+        "",
+        "  ── Capabilities ──",
+    }
+    
+    -- Required
+    local requiredList = {"Drawing", "getgenv", "game"}
+    for _, name in ipairs(requiredList) do
+        local icon = caps[name] and "  ✅ " or "  ❌ "
+        table.insert(lines, icon .. name .. (caps[name] and "" or " (REQUIRED - MISSING!)"))
+    end
+    
+    table.insert(lines, "")
+    table.insert(lines, "  ── Optional Features ──")
+    
+    local optionalDisplay = {
+        {"decompile",          "Script Decompilation"},
+        {"getscriptbytecode",  "Bytecode Extraction"},
+        {"hookmetamethod",     "Remote Spy (outgoing)"},
+        {"getconnections",     "Remote Spy (incoming)"},
+        {"gethiddenproperty",  "Hidden Properties"},
+        {"getproperties",      "Property Enumeration"},
+        {"saveinstance",       "Game Export"},
+        {"writefile",          "File Saving"},
+        {"setclipboard",       "Clipboard Copy"},
+        {"getnilinstances",    "Nil Instances"},
+        {"newcclosure",        "Closure Wrapping"},
+        {"getcallingscript",   "Caller Detection"},
+    }
+    
+    for _, pair in ipairs(optionalDisplay) do
+        local name, desc = pair[1], pair[2]
+        local icon = caps[name] and "  ✅ " or "  ⚠️ "
+        table.insert(lines, icon .. desc .. " (" .. name .. ")")
+    end
+    
+    table.insert(lines, "")
+    
+    -- Check for critical missing capabilities
+    local missing = {}
+    for _, name in ipairs(requiredList) do
+        if not caps[name] then
+            table.insert(missing, name)
+        end
+    end
+    
+    if #missing > 0 then
+        table.insert(lines, "  ❌ CRITICAL: Missing required capabilities: " .. table.concat(missing, ", "))
+        table.insert(lines, "  ❌ Analyzer cannot start. Please use a UNC-compatible executor.")
+    else
+        table.insert(lines, "  ✅ All required capabilities available. Starting...")
+    end
+    
+    table.insert(lines, "")
+    
+    for _, line in ipairs(lines) do
+        print(line)
+    end
+    
+    return #missing == 0
+end
+
+----------------------------------------------------------------------
+-- Module Loading
+----------------------------------------------------------------------
+local EMBEDDED = {
+["ui_framework.lua"] = [===[
+--[[
     Analyzer — UI Framework
     Drawing API Widget System
     
@@ -2159,4 +2331,901 @@ function UI.cleanup()
     _sections = nil
 end
 
-return UI
+
+]===],
+["export.lua"] = [===[
+--[[ Analyzer — Export: saveinstance / writefile / clipboard, status line ]]
+local Analyzer = getgenv().Analyzer
+if not Analyzer then error("[Analyzer] Export loaded before loader.") return end
+local UI = Analyzer.UI
+if not UI then error("[Analyzer] Export needs UI first.") return end
+
+local Export = {}
+Analyzer.Export = Export
+
+local function status(msg, color)
+    if Export._label then
+        Export._label:setText(msg:sub(1, 100))
+        Export._label:setColor(color or UI.Theme.Text)
+        Export._label:redraw()
+    end
+    print("[Analyzer] " .. msg)
+end
+
+function Export.init()
+    local area = UI.MainWindow.getContentArea()
+    local tabs = UI.MainWindow.getTabContainer()
+    local holder = UI.Widget.new({x = area.x, y = area.y, width = area.width, height = area.height, zIndex = 115})
+    holder.redraw = function() end
+    Export._label = UI.Label.new({x = area.x + 8, y = area.y + 8, text = "Export tools",
+        textColor = UI.Theme.Text, zIndex = 121})
+    local y = area.y + 36
+    Export._btns = {}
+    local function btn(text, fn)
+        local b = UI.Button.new({x = area.x + 8, y = y, width = 220, height = 28,
+            text = text, zIndex = 121, onClick = fn})
+        y = y + 34
+        table.insert(Export._btns, b)
+        return b
+    end
+    btn("Save Full Game (saveinstance)", function()
+        local si = getgenv().saveinstance
+        if type(si) ~= "function" then status("saveinstance() missing", UI.Theme.Warning) return end
+        local ok, err = pcall(si) status(ok and "Saved via saveinstance" or "Fail: "..tostring(err):sub(1,60),
+            ok and UI.Theme.Success or UI.Theme.Error)
+    end)
+    btn("Copy Selected Path", function()
+        local sc = getgenv().setclipboard
+        if type(sc) ~= "function" then status("setclipboard() missing", UI.Theme.Warning) return end
+        local sel = Analyzer.Explorer and Analyzer.Explorer._selected
+        local inst = sel and sel._instance
+        if inst then pcall(sc, inst:GetFullName()) status("Copied: "..inst.Name, UI.Theme.Success)
+        else status("Nothing selected", UI.Theme.Warning) end
+    end)
+    btn("Dump Remote Log", function()
+        local wf = getgenv().writefile
+        local lines = {}
+        if Analyzer.RemoteSpy then for _, e in ipairs(Analyzer.RemoteSpy._log) do
+            table.insert(lines, e.time.." "..e.path.." "..e.args) end end
+        if type(wf) == "function" then
+            local ok = pcall(wf, "analyzer_remotes.txt", table.concat(lines, "\n"))
+            status(ok and "Wrote analyzer_remotes.txt" or "writefile failed",
+                ok and UI.Theme.Success or UI.Theme.Error)
+        elseif type(getgenv().setclipboard) == "function" then
+            pcall(getgenv().setclipboard, table.concat(lines, "\n")) status("Copied log", UI.Theme.Success)
+        else status("No writefile/clipboard", UI.Theme.Warning) end
+    end)
+    tabs:registerContent("Export", holder)
+    Export._conns = Export._conns or {}
+    table.insert(Export._conns, Analyzer.Signals.TabChanged:Connect(function(name)
+        local show = Analyzer._visible and name == "Export"
+        if Export._label then Export._label:setVisible(show) end
+        for _, b in ipairs(Export._btns or {}) do b:setVisible(show) end
+    end))
+    print("[Analyzer] Export initialized")
+end
+
+function Export.cleanup()
+    for _, c in ipairs(Export._conns or {}) do pcall(function() c.Disconnect(c) end) end
+    Export._conns = {}
+end
+
+
+]===],
+["explorer.lua"] = [===[
+--[[ Analyzer — Explorer: lazy-load instance tree ]]
+local Analyzer = getgenv().Analyzer
+if not Analyzer then error("[Analyzer] Explorer loaded before loader.") return end
+local UI = Analyzer.UI
+if not UI then error("[Analyzer] Explorer needs UI first.") return end
+
+local Explorer = {}
+Analyzer.Explorer = Explorer
+Explorer._nodes = {} -- flat visible rows {node=TreeNode, depth}
+Explorer._selected = nil
+Explorer._conns = {}
+
+local function getRoots()
+    local roots = {}
+    local names = {"Workspace","Players","Lighting","ReplicatedStorage","ReplicatedFirst",
+        "ServerStorage","StarterGui","StarterPack","SoundService","TweenService","HttpService"}
+    for _, n in ipairs(names) do
+        local ok, svc = pcall(game.GetService, game, n)
+        if ok and svc then table.insert(roots, svc) end
+    end
+    if #roots == 0 then -- ponytail: fallback, full svc list when GetService fails
+        for _, c in ipairs(game:GetChildren()) do table.insert(roots, c) end
+    end
+    return roots
+end
+
+local function hasKids(inst)
+    local ok, kids = pcall(function() return inst:GetChildren() end)
+    return ok and kids and #kids > 0
+end
+
+function Explorer:_layout()
+    local area = self._area
+    if not area then return end
+    local show = Analyzer._visible and self._tabActive
+    local f = self._filter or ""
+    local y = area.y - self._scroll._scrollOffset
+    local shown = 0
+    for _, row in ipairs(self._nodes) do
+        local match = f == "" or row.node._instance.Name:lower():find(f, 1, true)
+        if match then
+            row.node:updatePosition(area.x, y)
+            row.node:setVisible(show and y >= area.y - 20 and y < area.y + area.height)
+            y = y + UI.Theme.LineHeight
+            shown = shown + 1
+        else
+            row.node:setVisible(false)
+        end
+    end
+    self._scroll:setContentHeight(shown * UI.Theme.LineHeight)
+    if self._search then self._search:setVisible(show) end
+    if self._refreshBtn then self._refreshBtn:setVisible(show) end
+end
+
+function Explorer:_insertChildren(parentRow, parentNode)
+    local inst = parentNode._instance
+    local ok, kids = pcall(function() return inst:GetChildren() end)
+    if not ok then return end
+    table.sort(kids, function(a, b) return a.Name < b.Name end)
+    local idx = 0
+    for i, row in ipairs(self._nodes) do if row.node == parentNode then idx = i break end end
+    for j = #kids, 1, -1 do -- insert in order after parent
+        local child = kids[j]
+        local node = UI.TreeNode.new({
+            x = 0, y = 0, width = self._area.width - 8, height = UI.Theme.LineHeight,
+            instance = child, text = child.Name, depth = parentRow.depth + 1,
+            className = child.ClassName, hasChildren = hasKids(child),
+            zIndex = 120,
+            onSelect = function(n) self:select(n._instance, n) end,
+            onExpand = function(n) self:_onExpand(n) end,
+            onCollapse = function(n) self:_onCollapse(n) end,
+        })
+        table.insert(self._nodes, idx + 1, {node = node, depth = parentRow.depth + 1})
+        table.insert(parentNode._childNodes, node)
+    end
+    self:_layout()
+end
+
+function Explorer:_onExpand(node)
+    local row
+    for _, r in ipairs(self._nodes) do if r.node == node then row = r break end end
+    if row then self:_insertChildren(row, node) end
+    -- ponytail: no auto-refresh on ChildAdded (full refresh collapses the tree
+    -- and thrashes on spammy games); Refresh button re-syncs on demand
+    node._hasChildren = true
+end
+
+function Explorer:_onCollapse(_node) self:_layout() end
+
+function Explorer:select(inst, node)
+    if self._selected and self._selected.setSelected then
+        pcall(function() self._selected:setSelected(false) end)
+    end
+    self._selected = node
+    if node then pcall(function() node:setSelected(true) end) end
+    Analyzer.Signals.InstanceSelected:Fire(inst)
+    Analyzer.Signals.ScriptRequested:Fire(inst)
+end
+
+function Explorer:refresh()
+    for _, row in ipairs(self._nodes) do pcall(function() row.node:destroy() end) end
+    self._nodes = {}
+    self._selected = nil
+    if not self._area then return end
+    for _, root in ipairs(getRoots()) do
+        local node = UI.TreeNode.new({
+            x = 0, y = 0, width = self._area.width - 8, height = UI.Theme.LineHeight,
+            instance = root, text = root.Name, depth = 0,
+            className = root.ClassName, hasChildren = hasKids(root), zIndex = 120,
+            onSelect = function(n) self:select(n._instance, n) end,
+            onExpand = function(n) self:_onExpand(n) end,
+            onCollapse = function(n) self:_onCollapse(n) end,
+        })
+        table.insert(self._nodes, {node = node, depth = 0})
+    end
+    self:_layout()
+end
+
+function Explorer.init()
+    local area = UI.MainWindow.getTreeArea()
+    Explorer._area = area
+    local tabs = UI.MainWindow.getTabContainer()
+    local holder = UI.Widget.new({x = area.x, y = area.y, width = area.width, height = area.height, zIndex = 115})
+    holder.redraw = function() end
+    Explorer._holder = holder
+    Explorer._search = UI.TextInput.new({x = area.x, y = area.y, width = area.width - 90, height = 24,
+        placeholder = "Filter by name...", zIndex = 121,
+        onChange = function(t) Explorer._filter = t:lower() Explorer:_layout() end})
+    Explorer._refreshBtn = UI.Button.new({x = area.x + area.width - 80, y = area.y, width = 80, height = 24,
+        text = "Refresh", zIndex = 121, onClick = function() Explorer:refresh() end})
+    Explorer._scroll = UI.ScrollContainer.new({x = area.x, y = area.y + 28, width = area.width,
+        height = area.height - 28, zIndex = 120, itemHeight = UI.Theme.LineHeight,
+        onScroll = function() Explorer:_layout() end})
+    Explorer._area = {x = area.x, y = area.y + 28, width = area.width, height = area.height - 28}
+    tabs:registerContent("Explorer", holder)
+    -- show/hide with tab: hook visibility via TabChanged
+    table.insert(Explorer._conns, Analyzer.Signals.TabChanged:Connect(function(name)
+        Explorer._tabActive = true -- tree pane is always visible in single-menu layout
+        Explorer:_layout()
+    end))
+    Explorer._tabActive = true -- default tab
+    Explorer:refresh()
+    Explorer._search:setVisible(false) Explorer._refreshBtn:setVisible(false)
+    print("[Analyzer] Explorer initialized")
+end
+
+function Explorer.cleanup()
+    for _, c in ipairs(Explorer._conns) do pcall(function() c.Disconnect(c) end) end
+    Explorer._conns = {}
+    for _, row in ipairs(Explorer._nodes) do pcall(function() row.node:destroy() end) end
+    Explorer._nodes = {}
+    Explorer._selected = nil
+end
+
+
+]===],
+["properties.lua"] = [===[
+--[[ Analyzer — Properties: live snapshot + GetPropertyChangedSignal ]]
+local Analyzer = getgenv().Analyzer
+if not Analyzer then error("[Analyzer] Properties loaded before loader.") return end
+local UI = Analyzer.UI
+if not UI then error("[Analyzer] Properties needs UI first.") return end
+
+local Properties = {}
+Analyzer.Properties = Properties
+Properties._items = {}
+Properties._propConns = {}
+Properties._conns = {}
+Properties._current = nil
+
+-- ponytail: curated fallback, extend when a ClassName is missing
+local FALLBACK = {
+    Part = {"Name","ClassName","Position","Size","Anchored","CanCollide","Transparency","Color","Material","Parent"},
+    Model = {"Name","ClassName","PrimaryPart","Parent"},
+    Script = {"Name","ClassName","Enabled","RunContext","Parent"},
+    LocalScript = {"Name","ClassName","Enabled","Parent"},
+    ModuleScript = {"Name","ClassName","Parent"},
+    RemoteEvent = {"Name","ClassName","Parent"},
+    RemoteFunction = {"Name","ClassName","Parent"},
+    TextLabel = {"Name","ClassName","Text","TextColor3","BackgroundColor3","Visible","Parent"},
+    Frame = {"Name","ClassName","BackgroundColor3","Visible","Size","Position","Parent"},
+}
+local GENERIC = {"Name","ClassName","Parent"}
+
+local function serialize(v)
+    local t = typeof(v)
+    if t == "Vector3" then return string.format("%.1f, %.1f, %.1f", v.X, v.Y, v.Z)
+    elseif t == "Color3" then return string.format("#%02X%02X%02X", v.R*255, v.G*255, v.B*255)
+    elseif t == "Instance" then return v and v:GetFullName() or "nil"
+    elseif t == "EnumItem" then return tostring(v) end
+    local ok, s = pcall(tostring, v)
+    return ok and (s:sub(1, 80)) or "?"
+end
+
+local function propNames(inst)
+    local gp = getgenv().getproperties or getgenv().getprops
+    if type(gp) == "function" then
+        local ok, list = pcall(gp, inst)
+        if ok and type(list) == "table" then
+            local out = {}
+            for k in pairs(list) do table.insert(out, tostring(k)) end
+            table.sort(out)
+            return out
+        end
+    end
+    return FALLBACK[inst.ClassName] or GENERIC
+end
+
+function Properties:clear()
+    for _, c in ipairs(self._propConns) do pcall(function() c:Disconnect() end) end
+    self._propConns = {}
+    for _, it in ipairs(self._items) do pcall(function() it:destroy() end) end
+    self._items = {}
+end
+
+function Properties:show(inst)
+    self:clear()
+    self._current = inst
+    self._tabActive = true -- ponytail: show() implies tab switch (signal is async)
+    if not inst or not self._area then return end
+    local names = propNames(inst)
+    local y0 = self._area.y - self._scroll._scrollOffset
+    for i, pname in ipairs(names) do
+        local ok, val = pcall(function() return inst[pname] end)
+        local item = UI.ListItem.new({x = self._area.x, y = y0 + (i-1) * UI.Theme.LineHeight,
+            width = self._area.width, height = UI.Theme.LineHeight,
+            key = pname, value = ok and serialize(val) or "—", index = i, zIndex = 120})
+        item:setVisible(Analyzer._visible)
+        table.insert(self._items, item)
+        -- live update; disconnect all on next show() (prevents leaks)
+        pcall(function()
+            local conn = inst:GetPropertyChangedSignal(pname):Connect(function()
+                local ok2, v2 = pcall(function() return inst[pname] end)
+                if ok2 then item:setKeyValue(pname, serialize(v2)) end
+            end)
+            table.insert(self._propConns, conn)
+            table.insert(Analyzer._connections, conn)
+        end)
+    end
+    self._scroll:setContentHeight(#names * UI.Theme.LineHeight)
+    self:_layout()
+end
+
+function Properties:_layout()
+    if not self._area then return end
+    local show = Analyzer._visible and self._tabActive
+    local y = self._area.y - self._scroll._scrollOffset
+    for _, it in ipairs(self._items) do
+        it:updatePosition(self._area.x, y)
+        it:setVisible(show and y >= self._area.y - 20 and y < self._area.y + self._area.height)
+        y = y + UI.Theme.LineHeight
+    end
+end
+
+function Properties.init()
+    local area = UI.MainWindow.getContentArea()
+    Properties._area = area
+    local tabs = UI.MainWindow.getTabContainer()
+    local holder = UI.Widget.new({x = area.x, y = area.y, width = area.width, height = area.height, zIndex = 115})
+    holder.redraw = function() end
+    Properties._scroll = UI.ScrollContainer.new({x = area.x, y = area.y, width = area.width,
+        height = area.height, zIndex = 120, itemHeight = UI.Theme.LineHeight,
+        onScroll = function() Properties:_layout() end})
+    tabs:registerContent("Properties", holder)
+    table.insert(Properties._conns, Analyzer.Signals.InstanceSelected:Connect(function(inst)
+        tabs:switchTab("Properties")
+        Properties:show(inst)
+    end))
+    table.insert(Properties._conns, Analyzer.Signals.TabChanged:Connect(function(name)
+        Properties._tabActive = (name == "Properties")
+        Properties:_layout()
+    end))
+    Properties._tabActive = false
+    print("[Analyzer] Properties initialized")
+end
+
+function Properties.cleanup()
+    for _, c in ipairs(Properties._conns) do pcall(function() c.Disconnect(c) end) end
+    Properties._conns = {}
+    Properties:clear()
+end
+
+
+]===],
+["script_viewer.lua"] = [===[
+--[[ Analyzer — Script Viewer: decompile + inline highlight + virtual scroll ]]
+local Analyzer = getgenv().Analyzer
+if not Analyzer then error("[Analyzer] ScriptViewer loaded before loader.") return end
+local UI = Analyzer.UI
+if not UI then error("[Analyzer] ScriptViewer needs UI first.") return end
+
+local SV = {}
+Analyzer.ScriptViewer = SV
+SV._conns = {}
+
+local KW = {["local"]=1,["function"]=1,["end"]=1,["if"]=1,["then"]=1,["else"]=1,
+    ["elseif"]=1,["for"]=1,["while"]=1,["do"]=1,["return"]=1,["nil"]=1,["true"]=1,
+    ["false"]=1,["and"]=1,["or"]=1,["not"]=1,["in"]=1,["repeat"]=1,["until"]=1,["break"]=1}
+local BUILTIN = {game=1, workspace=1, script=1, print=1, pairs=1, ipairs=1, tostring=1,
+    tonumber=1, task=1, require=1, table=1, string=1, math=1, Instance=1}
+
+local function tokenize(line)
+    local segs, i, n = {}, 1, #line
+    local function push(t, c) -- ponytail: merge runs, cap 8 segs/line in TextBlock
+        if #segs > 0 and segs[#segs][2] == c then segs[#segs][1] = segs[#segs][1] .. t
+        else table.insert(segs, {t, c}) end
+    end
+    while i <= n do
+        local c = line:sub(i, i)
+        if c == "-" and line:sub(i, i+1) == "--" then push(line:sub(i), UI.Theme.Syntax.Comment) break
+        elseif c == '"' or c == "'" then
+            local j = line:find(c, i+1) or n
+            push(line:sub(i, j), UI.Theme.Syntax.String) i = j + 1
+        elseif c:match("%d") then
+            local num = line:match("^%d+%.?%d*", i) push(num, UI.Theme.Syntax.Number) i = i + #num
+        elseif c:match("[%a_]") then
+            local w = line:match("^[%a_][%w_]*", i)
+            push(w, KW[w] and UI.Theme.Syntax.Keyword or BUILTIN[w] and UI.Theme.Syntax.BuiltIn or UI.Theme.Syntax.Default)
+            i = i + #w
+        else push(c, UI.Theme.Syntax.Default) i = i + 1 end
+    end
+    if #segs == 0 then segs = {{"", UI.Theme.Syntax.Default}} end
+    while #segs > 8 do table.remove(segs) end -- ponytail: truncate exotic lines
+    return segs
+end
+
+function SV:view(inst)
+    if not inst then return end
+    local label = inst:GetFullName()
+    local src = "-- select a Script / LocalScript / ModuleScript"
+    if inst:IsA("LuaSourceContainer") then
+        local dec = getgenv().decompile
+        if type(dec) == "function" then
+            local ok, out = pcall(dec, inst)
+            src = (ok and type(out) == "string") and out or ("-- decompile failed: " .. tostring(out):sub(1,120))
+        else
+            local g = getgenv().getscriptbytecode
+            if type(g) == "function" then
+                local ok = pcall(g, inst)
+                src = ok and "-- bytecode only (no decompiler); showing disassembly unsupported in v1" or src
+            else src = "-- no decompile() in this executor (needs UNC decompile)" end
+        end
+    end
+    self._path:setText(label:sub(1, 90))
+    self._path:redraw()
+    self._block:setContent(src)
+end
+
+function SV.init()
+    local area = UI.MainWindow.getContentArea()
+    local tabs = UI.MainWindow.getTabContainer()
+    local holder = UI.Widget.new({x = area.x, y = area.y, width = area.width, height = area.height, zIndex = 115})
+    holder.redraw = function() end
+    SV._path = UI.Label.new({x = area.x + 8, y = area.y + 4, text = "No script selected",
+        textColor = UI.Theme.Accent, zIndex = 121})
+    SV._copy = UI.Button.new({x = area.x + area.width - 88, y = area.y + 2, width = 80, height = 24,
+        text = "Copy", zIndex = 121, onClick = function()
+            local sc = getgenv().setclipboard
+            if type(sc) == "function" and SV._block._lines then
+                pcall(sc, table.concat(SV._block._lines, "\n"))
+                UI.Notification.show("Copied", 1)
+            end
+        end})
+    SV._block = UI.TextBlock.new({x = area.x, y = area.y + 30, width = area.width,
+        height = area.height - 30, zIndex = 120, tokenizer = tokenize, maxSegments = 8})
+    tabs:registerContent("Scripts", holder)
+    table.insert(SV._conns, Analyzer.Signals.ScriptRequested:Connect(function(inst)
+        if inst and inst:IsA("LuaSourceContainer") then
+            tabs:switchTab("Scripts")
+            SV:view(inst)
+        end
+    end))
+    table.insert(SV._conns, Analyzer.Signals.TabChanged:Connect(function(name)
+        local show = Analyzer._visible and name == "Scripts"
+        SV._path:setVisible(show)
+        SV._copy:setVisible(show)
+        SV._block:setVisible(show)
+    end))
+    SV._block:setContent("-- click a Script in Explorer to decompile")
+    print("[Analyzer] ScriptViewer initialized")
+end
+
+function SV.cleanup()
+    for _, c in ipairs(SV._conns) do pcall(function() c.Disconnect(c) end) end
+    SV._conns = {}
+end
+
+
+]===],
+["remote_spy.lua"] = [===[
+--[[ Analyzer — Remote Spy: __namecall hook, capped FIFO 500, one-line log ]]
+local Analyzer = getgenv().Analyzer
+if not Analyzer then error("[Analyzer] RemoteSpy loaded before loader.") return end
+local UI = Analyzer.UI
+if not UI then error("[Analyzer] RemoteSpy needs UI first.") return end
+
+local Spy = {}
+Analyzer.RemoteSpy = Spy
+Spy._log = {}
+Spy._paused = false
+Spy._hooked = false
+Spy._conns = {}
+Spy.MAX = 500
+
+local function serializeArgs(...)
+    local out = {}
+    for i = 1, select("#", ...) do
+        local v = select(i, ...)
+        local t = typeof(v)
+        local s
+        if t == "Instance" then s = v:GetFullName()
+        elseif t == "Vector3" then s = string.format("V3(%.1f,%.1f,%.1f)", v.X, v.Y, v.Z)
+        elseif t == "string" then s = '"' .. v:sub(1, 60) .. '"'
+        else local ok, r = pcall(tostring, v) s = ok and r:sub(1, 60) or "?" end
+        table.insert(out, s)
+    end
+    return table.concat(out, ", ")
+end
+
+function Spy:_render()
+    if not self._block then return end
+    local lines = {}
+    local f = (self._filter or ""):lower()
+    for _, e in ipairs(self._log) do -- ponytail: newest at bottom, no expandable rows in v1
+        local line = string.format("[%s] %s :: %s(%s)", e.dir, e.time, e.path, e.args)
+        if f == "" or line:lower():find(f, 1, true) then table.insert(lines, line:sub(1, 160)) end
+    end
+    self._block:setContent(#lines > 0 and table.concat(lines, "\n") or "-- no remote calls captured yet")
+end
+
+function Spy:push(dir, remote, method, ...)
+    if self._paused then return end
+    table.insert(self._log, {dir = dir, time = os.date("%X"), path = remote:GetFullName(),
+        args = (method ~= "" and method .. "; " or "") .. serializeArgs(...)})
+    while #self._log > self.MAX do table.remove(self._log, 1) end -- FIFO cap
+    Analyzer.Signals.RemoteLogged:Fire(self._log[#self._log])
+    -- ponytail: throttle render to 3/sec; spammy games fire dozens/sec
+    if Analyzer._visible and self._block then
+        local now = os.clock()
+        if now - (self._lastRender or 0) > 0.33 and not self._renderQueued then
+            self._lastRender = now
+            self:_render()
+        elseif not self._renderQueued then
+            self._renderQueued = true
+            task.delay(0.33, function()
+                self._renderQueued = false
+                self._lastRender = os.clock()
+                if Analyzer._visible then self:_render() end
+            end)
+        end
+    end
+end
+
+function Spy:start()
+    if self._hooked then return end
+    local hmm = getgenv().hookmetamethod
+    local ncm = getgenv().getnamecallmethod
+    if type(hmm) ~= "function" then return end -- executor without hook: spy stays idle
+    local wrap = getgenv().newcclosure
+    local function handler(selfObj, ...)
+        local method = ""
+        if type(ncm) == "function" then local ok, m = pcall(ncm) if ok then method = m end end
+        if (method == "FireServer" or method == "InvokeServer")
+            and (selfObj:IsA("RemoteEvent") or selfObj:IsA("RemoteFunction")) then
+            pcall(function() Spy:push("OUT", selfObj, method, ...) end)
+        end
+        return Spy._hookedFn(selfObj, ...)
+    end
+    -- ponytail: pcall everything; a throwing newcclosure/hook must idle the spy, not kill init
+    local wrapped = handler
+    if type(wrap) == "function" then
+        local wok, w = pcall(wrap, handler)
+        if wok and type(w) == "function" then wrapped = w end
+    end
+    local ok, old = pcall(hmm, game, "__namecall", wrapped)
+    if not ok or type(old) ~= "function" then return end
+    -- ponytail: keep the TRUE original across rebuild re-hooks
+    if not Analyzer._originalNamecall then Analyzer._originalNamecall = old end
+    Spy._hookedFn = old
+    self._hooked = true
+end
+
+function Spy.init()
+    local area = UI.MainWindow.getContentArea()
+    local tabs = UI.MainWindow.getTabContainer()
+    local holder = UI.Widget.new({x = area.x, y = area.y, width = area.width, height = area.height, zIndex = 115})
+    holder.redraw = function() end
+    Spy._filterBox = UI.TextInput.new({x = area.x + 8, y = area.y + 4, width = area.width - 260,
+        height = 24, placeholder = "Filter...", zIndex = 121,
+        onChange = function(t) Spy._filter = t Spy:_render() end})
+    Spy._pauseBtn = UI.Button.new({x = area.x + area.width - 244, y = area.y + 4, width = 70, height = 24,
+        text = "Pause", zIndex = 121, onClick = function(selfBtn)
+            Spy._paused = not Spy._paused selfBtn:setText(Spy._paused and "Resume" or "Pause") end})
+    Spy._clearBtn = UI.Button.new({x = area.x + area.width - 166, y = area.y + 4, width = 70, height = 24,
+        text = "Clear", zIndex = 121, onClick = function() Spy._log = {} Spy:_render() end})
+    Spy._copyBtn = UI.Button.new({x = area.x + area.width - 88, y = area.y + 4, width = 80, height = 24,
+        text = "Copy", zIndex = 121, onClick = function()
+            local sc = getgenv().setclipboard
+            if type(sc) == "function" then pcall(sc, table.concat((function()
+                local l = {} for _, e in ipairs(Spy._log) do table.insert(l, e.path) end return l end)(), "\n")) end
+        end})
+    Spy._block = UI.TextBlock.new({x = area.x, y = area.y + 34, width = area.width,
+        height = area.height - 34, zIndex = 120, showLineNumbers = false})
+    tabs:registerContent("Remote Spy", holder)
+    table.insert(Spy._conns, Analyzer.Signals.TabChanged:Connect(function(name)
+        local show = Analyzer._visible and name == "Remote Spy"
+        Spy._filterBox:setVisible(show)
+        Spy._pauseBtn:setVisible(show)
+        Spy._clearBtn:setVisible(show)
+        Spy._copyBtn:setVisible(show)
+        Spy._block:setVisible(show)
+    end))
+    Spy:start()
+    Spy:_render()
+    print("[Analyzer] RemoteSpy initialized")
+end
+
+function Spy.cleanup()
+    for _, c in ipairs(Spy._conns) do pcall(function() c.Disconnect(c) end) end
+    Spy._conns = {}
+    if Analyzer._originalNamecall and type(getgenv().hookmetamethod) == "function" then
+        pcall(function() getgenv().hookmetamethod(game, "__namecall", Analyzer._originalNamecall) end)
+        Analyzer._originalNamecall = nil
+    end
+    Spy._hooked = false
+end
+
+
+]===],
+}
+
+local function compileModule(filename, src)
+    -- ponytail: capture loadstring's REAL error (2nd return), never swallow it
+    local fn, cerr = loadstring(src, "@" .. filename)
+    if not fn then error("compile failed: " .. tostring(cerr)) end
+    return fn()
+end
+
+local function fetchModule(url)
+    local src = game:HttpGet(url, true)
+    -- ponytail: every module starts with "--[["; anything else is proxy/stale junk -> retry once
+    if type(src) ~= "string" or src:sub(1, 4) ~= "--[[" then
+        warn("[" .. CONFIG.NAME .. "] ⚠️ bad payload for " .. url .. " (got: " .. tostring(src):sub(1, 80) .. "), retrying...")
+        src = game:HttpGet(url, true)
+    end
+    return src
+end
+
+local function loadModule(name, filename)
+    local success, result
+    local src = nil
+
+    if EMBEDDED and EMBEDDED[filename] then
+        -- single-file release build: no network, no cache skew between files
+        src = EMBEDDED[filename]
+        success, result = pcall(compileModule, filename, src)
+    else    if CONFIG.BASE_URL then
+        -- Load from remote URL
+        local url = CONFIG.BASE_URL .. "/" .. filename
+        success, result = pcall(function()
+            src = fetchModule(url)
+            return src
+        end)
+        if success then
+            success, result = pcall(compileModule, filename, src)
+        end
+    else
+        -- Load from local workspace (development mode)
+        -- Try readfile first, fall back to requiring from workspace
+        if Analyzer._capabilities.readfile or (type(readfile) == "function") then
+            success, result = pcall(function()
+                local source = readfile(filename)
+                return loadstring(source)()
+            end)
+        end
+        
+        if not success then
+            -- Try direct loadstring from workspace path
+            success, result = pcall(function()
+                return loadstring(game:HttpGet("file://" .. filename, true))()
+            end)
+        end
+    end
+    
+    if success then
+        print("[" .. CONFIG.NAME .. "] ✅ Loaded: " .. name)
+        return result
+    else
+        local err = tostring(result)
+        warn("[" .. CONFIG.NAME .. "] ❌ Failed to load " .. name .. ": " .. err)
+        -- ponytail: dump the offending source line so executor chunk-wrappers can't hide it
+        local lnum = err:match(":(%d+):")
+        if lnum and src then
+            local lines = {}
+            for line in (src .. "\n"):gmatch("(.-)\n") do table.insert(lines, line) end
+            lnum = tonumber(lnum)
+            for i = math.max(1, lnum - 2), math.min(#lines, lnum + 2) do
+                warn(string.format("[%s] %s %d: %s", CONFIG.NAME, i == lnum and ">>>" or "   ", i, lines[i]:sub(1, 160)))
+            end
+            warn(string.format("[%s] (chunk has %d lines; if %d is beyond that, the executor wraps chunks)", CONFIG.NAME, #lines, lnum))
+        end
+        return nil
+    end
+end
+
+----------------------------------------------------------------------
+-- Safe Viewport (validates real screensize, falls back when unreadable)
+----------------------------------------------------------------------
+local function getSafeViewport()
+    local w, h = 1280, 720 -- ponytail: fallback, real size when readable
+    pcall(function()
+        local cam = workspace.CurrentCamera
+        if cam and cam.ViewportSize then
+            local vs = cam.ViewportSize
+            if vs.X > 100 and vs.Y > 100 then
+                w, h = math.floor(vs.X), math.floor(vs.Y)
+            end
+        end
+    end)
+    return w, h
+end
+
+----------------------------------------------------------------------
+-- Tray Icon
+----------------------------------------------------------------------
+local trayIcon = nil
+local trayClickRegion = nil
+
+local function createTrayIcon()
+    local vw, vh = getSafeViewport()
+    local viewportSize = Vector2.new(vw, vh)
+    
+    local x = viewportSize.X - CONFIG.TRAY_ICON_MARGIN - CONFIG.TRAY_ICON_RADIUS
+    local y = viewportSize.Y - CONFIG.TRAY_ICON_MARGIN - CONFIG.TRAY_ICON_RADIUS
+    
+    trayIcon = Drawing.new("Square")
+    trayIcon.Position = Vector2.new(x, y)
+    trayIcon.Size = Vector2.new(CONFIG.TRAY_ICON_RADIUS * 2, CONFIG.TRAY_ICON_RADIUS * 2)
+    trayIcon.Color = CONFIG.TRAY_ICON_COLOR
+    trayIcon.Filled = true
+    trayIcon.Thickness = 0
+    trayIcon.Transparency = 0.8
+    trayIcon.Visible = true
+    trayIcon.ZIndex = 9999
+    
+    table.insert(Analyzer._drawingObjects, trayIcon)
+    
+    -- Outline frame (square: no rounded edges in this UI)
+    local trayOutline = Drawing.new("Square")
+    trayOutline.Position = Vector2.new(x - 2, y - 2)
+    trayOutline.Size = Vector2.new(CONFIG.TRAY_ICON_RADIUS * 2 + 4, CONFIG.TRAY_ICON_RADIUS * 2 + 4)
+    trayOutline.Color = Color3.fromRGB(60, 60, 60)
+    trayOutline.Filled = false
+    trayOutline.Thickness = 1
+    trayOutline.Transparency = 0.6
+    trayOutline.Visible = true
+    trayOutline.ZIndex = 9998
+    
+    table.insert(Analyzer._drawingObjects, trayOutline)
+    
+    return x, y
+end
+
+----------------------------------------------------------------------
+-- Input Handling (Keybind + Tray Click)
+----------------------------------------------------------------------
+local function setupInput(trayX, trayY)
+    local UserInputService = game:GetService("UserInputService")
+    -- ponytail: GetMouseLocation includes topbar inset; Drawing coords are absolute
+    local function mousePos()
+        local p = UserInputService:GetMouseLocation()
+        pcall(function()
+            p = p - game:GetService("GuiService"):GetGuiInset()
+        end)
+        return p
+    end
+    
+    -- Toggle keybind
+    local toggleConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        
+        if input.KeyCode == CONFIG.TOGGLE_KEY then
+            Analyzer._visible = not Analyzer._visible
+            if Analyzer.UI and Analyzer.UI.setVisible then
+                Analyzer.UI.setVisible(Analyzer._visible)
+            end
+            
+            -- Update tray icon color
+            if trayIcon then
+                trayIcon.Color = Analyzer._visible 
+                    and Color3.fromRGB(80, 200, 80) 
+                    or CONFIG.TRAY_ICON_COLOR
+            end
+        end
+    end)
+    table.insert(Analyzer._connections, toggleConn)
+    
+    -- Tray icon click detection
+    local clickConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+
+        local dist = (mousePos() - Vector2.new(trayX + CONFIG.TRAY_ICON_RADIUS, trayY + CONFIG.TRAY_ICON_RADIUS)).Magnitude
+        
+        if dist <= CONFIG.TRAY_ICON_RADIUS + 5 then
+            Analyzer._visible = not Analyzer._visible
+            if Analyzer.UI and Analyzer.UI.setVisible then
+                Analyzer.UI.setVisible(Analyzer._visible)
+            end
+            
+            if trayIcon then
+                trayIcon.Color = Analyzer._visible 
+                    and Color3.fromRGB(80, 200, 80) 
+                    or CONFIG.TRAY_ICON_COLOR
+            end
+        end
+    end)
+    table.insert(Analyzer._connections, clickConn)
+end
+
+----------------------------------------------------------------------
+-- Master Cleanup Function
+----------------------------------------------------------------------
+function Analyzer._cleanup()
+    print("[" .. CONFIG.NAME .. "] Cleaning up...")
+    
+    -- Disconnect all signals
+    for _, conn in ipairs(Analyzer._connections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    Analyzer._connections = {}
+    
+    -- Destroy all Drawing objects
+    for _, obj in ipairs(Analyzer._drawingObjects) do
+        pcall(function() obj:Remove() end)
+    end
+    Analyzer._drawingObjects = {}
+    
+    -- Call module-specific cleanup
+    local modules = {"UI", "Explorer", "Properties", "ScriptViewer", "RemoteSpy", "Export"}
+    for _, modName in ipairs(modules) do
+        if Analyzer[modName] and Analyzer[modName].cleanup then
+            pcall(Analyzer[modName].cleanup)
+        end
+    end
+    
+    -- Restore hooked metamethods
+    if Analyzer._originalNamecall then
+        pcall(function()
+            hookmetamethod(game, "__namecall", Analyzer._originalNamecall)
+        end)
+        Analyzer._originalNamecall = nil
+    end
+    
+    -- Clear the global
+    getgenv().Analyzer = nil
+    
+    print("[" .. CONFIG.NAME .. "] Cleanup complete.")
+end
+
+-- Re-initializes all feature modules (used by UI.rebuild() on resize)
+function Analyzer._initModules()
+    local modules = {"UI", "Explorer", "Properties", "ScriptViewer", "RemoteSpy", "Export"}
+    for _, modName in ipairs(modules) do
+        if Analyzer[modName] and Analyzer[modName].init then
+            local ok, err = pcall(Analyzer[modName].init)
+            if not ok then
+                warn("[" .. CONFIG.NAME .. "] ⚠️ Failed to init " .. modName .. ": " .. tostring(err))
+            end
+        end
+    end
+end
+local function main()
+    -- Step 1: Detect capabilities
+    local caps = detectCapabilities()
+    
+    -- Step 2: Print banner and check requirements
+    local canStart = printBanner(caps)
+    if not canStart then
+        Analyzer._cleanup()
+        return
+    end
+    
+    -- Step 3: Load modules in dependency order
+    print("[" .. CONFIG.NAME .. "] Loading modules...")
+    
+    local moduleOrder = {
+        {"UI Framework",   "ui_framework.lua"},
+        {"Export",         "export.lua"},
+        {"Explorer",       "explorer.lua"},
+        {"Properties",     "properties.lua"},
+        {"Script Viewer",  "script_viewer.lua"},
+        {"Remote Spy",     "remote_spy.lua"},
+    }
+    
+    for _, mod in ipairs(moduleOrder) do
+        loadModule(mod[1], mod[2])
+        task.wait() -- yield between modules to prevent timeout
+    end
+    
+    -- Step 4: Create tray icon
+    local trayX, trayY = createTrayIcon()
+    
+    -- Step 5: Setup input
+    setupInput(trayX, trayY)
+    
+    -- Step 6: Initialize all modules
+    Analyzer._initModules()
+    
+    -- Step 7: Mark as loaded
+    Analyzer._loaded = true
+    print("[" .. CONFIG.NAME .. "] ✅ Ready! Press Right Shift or click the tray icon to toggle.")
+    print("")
+end
+
+-- Run
+main()

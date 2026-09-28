@@ -168,24 +168,42 @@ end
 ----------------------------------------------------------------------
 -- Module Loading
 ----------------------------------------------------------------------
+local EMBEDDED = nil --[[BUNDLE_ANCHOR]]
+
+local function compileModule(filename, src)
+    -- ponytail: capture loadstring's REAL error (2nd return), never swallow it
+    local fn, cerr = loadstring(src, "@" .. filename)
+    if not fn then error("compile failed: " .. tostring(cerr)) end
+    return fn()
+end
+
+local function fetchModule(url)
+    local src = game:HttpGet(url, true)
+    -- ponytail: every module starts with "--[["; anything else is proxy/stale junk -> retry once
+    if type(src) ~= "string" or src:sub(1, 4) ~= "--[[" then
+        warn("[" .. CONFIG.NAME .. "] ⚠️ bad payload for " .. url .. " (got: " .. tostring(src):sub(1, 80) .. "), retrying...")
+        src = game:HttpGet(url, true)
+    end
+    return src
+end
+
 local function loadModule(name, filename)
     local success, result
     local src = nil
 
-    if CONFIG.BASE_URL then
+    if EMBEDDED and EMBEDDED[filename] then
+        -- single-file release build: no network, no cache skew between files
+        src = EMBEDDED[filename]
+        success, result = pcall(compileModule, filename, src)
+    else    if CONFIG.BASE_URL then
         -- Load from remote URL
         local url = CONFIG.BASE_URL .. "/" .. filename
         success, result = pcall(function()
-            src = game:HttpGet(url, true)
+            src = fetchModule(url)
             return src
         end)
         if success then
-            success, result = pcall(function()
-                -- ponytail: chunkname so errors point at the file, not ":NNN"
-                local fn = loadstring(src, "@" .. filename)
-                if not fn then error("compile failed") end
-                return fn()
-            end)
+            success, result = pcall(compileModule, filename, src)
         end
     else
         -- Load from local workspace (development mode)
