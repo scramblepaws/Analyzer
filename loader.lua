@@ -195,7 +195,7 @@ local function loadModule(name, filename)
         -- single-file release build: no network, no cache skew between files
         src = EMBEDDED[filename]
         success, result = pcall(compileModule, filename, src)
-    else    if CONFIG.BASE_URL then
+    elseif CONFIG.BASE_URL then
         -- Load from remote URL
         local url = CONFIG.BASE_URL .. "/" .. filename
         success, result = pcall(function()
