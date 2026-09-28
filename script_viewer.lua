@@ -6,6 +6,7 @@ if not UI then error("[Analyzer] ScriptViewer needs UI first.") return end
 
 local SV = {}
 Analyzer.ScriptViewer = SV
+SV._conns = {}
 
 local KW = {["local"]=1,["function"]=1,["end"]=1,["if"]=1,["then"]=1,["else"]=1,
     ["elseif"]=1,["for"]=1,["while"]=1,["do"]=1,["return"]=1,["nil"]=1,["true"]=1,
@@ -78,13 +79,13 @@ function SV.init()
     SV._block = UI.TextBlock.new({x = area.x, y = area.y + 30, width = area.width,
         height = area.height - 30, zIndex = 120, tokenizer = tokenize, maxSegments = 8})
     tabs:registerContent("Scripts", holder)
-    table.insert(Analyzer._connections, Analyzer.Signals.ScriptRequested:Connect(function(inst)
+    table.insert(SV._conns, Analyzer.Signals.ScriptRequested:Connect(function(inst)
         if inst and inst:IsA("LuaSourceContainer") then
             tabs:switchTab("Scripts")
             SV:view(inst)
         end
     end))
-    table.insert(Analyzer._connections, Analyzer.Signals.TabChanged:Connect(function(name)
+    table.insert(SV._conns, Analyzer.Signals.TabChanged:Connect(function(name)
         local show = Analyzer._visible and name == "Scripts"
         SV._path:setVisible(show)
         SV._copy:setVisible(show)
@@ -94,6 +95,9 @@ function SV.init()
     print("[Analyzer] ScriptViewer initialized")
 end
 
-function SV.cleanup() end
+function SV.cleanup()
+    for _, c in ipairs(SV._conns) do pcall(function() c.Disconnect(c) end) end
+    SV._conns = {}
+end
 
 return SV

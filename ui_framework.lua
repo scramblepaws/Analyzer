@@ -231,6 +231,23 @@ function Pool.getStats()
 end
 
 ----------------------------------------------------------------------
+-- Safe Viewport (validates real screensize, falls back when unreadable)
+----------------------------------------------------------------------
+function UI.getViewport()
+    local w, h = 1280, 720 -- ponytail: fallback, real size when readable
+    pcall(function()
+        local cam = workspace.CurrentCamera
+        if cam and cam.ViewportSize then
+            local vs = cam.ViewportSize
+            if vs.X > 100 and vs.Y > 100 then
+                w, h = math.floor(vs.X), math.floor(vs.Y)
+            end
+        end
+    end)
+    return w, h
+end
+
+----------------------------------------------------------------------
 -- Input System
 ----------------------------------------------------------------------
 local Input = {
@@ -276,13 +293,20 @@ function Input.hitTest(pos)
     return nil
 end
 
+-- ponytail: single mouse source; GetMouseLocation includes topbar inset, Drawing coords don't
+function Input.mousePos()
+    local p = game:GetService("UserInputService"):GetMouseLocation()
+    pcall(function() p = p - game:GetService("GuiService"):GetGuiInset() end)
+    return p
+end
+
 function Input.setup()
     local UIS = game:GetService("UserInputService")
     
     -- Mouse move
     local moveConn = UIS.InputChanged:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseMovement then
-            Input._mousePos = Vector2.new(input.Position.X, input.Position.Y)
+            Input._mousePos = Input.mousePos()
             
             -- Handle drag
             if Input._dragging and Input._dragging.onDrag then
@@ -318,7 +342,7 @@ function Input.setup()
     local clickConn = UIS.InputBegan:Connect(function(input, gameProcessed)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             Input._mouseDown = true
-            local pos = Vector2.new(input.Position.X, input.Position.Y)
+            local pos = Input.mousePos()
             local hit = Input.hitTest(pos)
             
             -- Focus management
@@ -355,7 +379,7 @@ function Input.setup()
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             Input._mouseDown = false
             
-            local pos = Vector2.new(input.Position.X, input.Position.Y)
+            local pos = Input.mousePos()
             
             if Input._dragging then
                 Input._dragging = nil
@@ -1787,8 +1811,8 @@ function Notification.show(text, duration, color)
     duration = duration or 1.5
     color = color or UI.Theme.Success
     
-    local camera = workspace.CurrentCamera
-    local viewportSize = camera.ViewportSize
+    local vw, vh = UI.getViewport()
+    local viewportSize = Vector2.new(vw, vh)
     
     -- Background
     local bg = Drawing.new("Square")
@@ -1849,14 +1873,14 @@ local _mainWindow = nil
 local _tabContainer = nil
 
 function MainWindow.create()
-    local camera = workspace.CurrentCamera
-    local viewport = camera.ViewportSize
-    local margin = UI.Theme.WindowMargin
+    local vw, vh = UI.getViewport()
+    -- ponytail: shrink margin on small screens so content stays usable
+    local margin = vw < 900 and 10 or UI.Theme.WindowMargin
     
     local winX = margin
     local winY = margin
-    local winW = viewport.X - margin * 2
-    local winH = viewport.Y - margin * 2
+    local winW = vw - margin * 2
+    local winH = vh - margin * 2
     
     -- Store dimensions globally
     UI._windowX = winX
@@ -1990,7 +2014,51 @@ end
 function UI.init()
     Input.setup()
     MainWindow.create()
+    UI._watchResize()
     print("[Analyzer] UI Framework initialized")
+end
+
+-- ponytail: rebuild (not reposition) on resize — reuses tested init paths.
+-- Polls 2x/sec; skips sub-2px jitter; debounces 0.5s through drag-resizes.
+function UI._watchResize()
+    if UI._watching then return end
+    UI._watching = true
+    task.spawn(function()
+        local lastW, lastH = UI.getViewport()
+        local pending = false
+        while UI._watching do
+            task.wait(0.5)
+            if getgenv().Analyzer == nil then break end
+            local w, h = UI.getViewport()
+            if math.abs(w - lastW) > 2 or math.abs(h - lastH) > 2 then
+                lastW, lastH = w, h
+                if not pending then
+                    pending = true
+                    task.delay(0.5, function()
+                        pending = false
+                        if pcall(UI.rebuild) then
+                            lastW, lastH = UI.getViewport()
+                        end
+                    end)
+                end
+            end
+        end
+    end)
+end
+
+function UI.rebuild()
+    if not Analyzer._loaded then return end
+    local wasVisible = Analyzer._visible
+    local mods = {"Explorer", "Properties", "ScriptViewer", "RemoteSpy", "Export"}
+    for _, m in ipairs(mods) do
+        if Analyzer[m] and Analyzer[m].cleanup then pcall(Analyzer[m].cleanup) end
+    end
+    UI.cleanup()
+    Input.setup()
+    MainWindow.create()
+    UI._watchResize()
+    Analyzer._initModules()
+    if wasVisible then MainWindow.setVisible(true) end
 end
 
 function UI.setVisible(visible)
@@ -1998,6 +2066,7 @@ function UI.setVisible(visible)
 end
 
 function UI.cleanup()
+    UI._watching = false
     Pool.releaseAll()
     
     for _, conn in ipairs(Input._connections) do

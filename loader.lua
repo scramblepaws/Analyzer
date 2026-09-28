@@ -170,13 +170,23 @@ end
 ----------------------------------------------------------------------
 local function loadModule(name, filename)
     local success, result
-    
+    local src = nil
+
     if CONFIG.BASE_URL then
         -- Load from remote URL
         local url = CONFIG.BASE_URL .. "/" .. filename
         success, result = pcall(function()
-            return loadstring(game:HttpGet(url, true))()
+            src = game:HttpGet(url, true)
+            return src
         end)
+        if success then
+            success, result = pcall(function()
+                -- ponytail: chunkname so errors point at the file, not ":NNN"
+                local fn = loadstring(src, "@" .. filename)
+                if not fn then error("compile failed") end
+                return fn()
+            end)
+        end
     else
         -- Load from local workspace (development mode)
         -- Try readfile first, fall back to requiring from workspace
@@ -199,9 +209,38 @@ local function loadModule(name, filename)
         print("[" .. CONFIG.NAME .. "] ✅ Loaded: " .. name)
         return result
     else
-        warn("[" .. CONFIG.NAME .. "] ❌ Failed to load " .. name .. ": " .. tostring(result))
+        local err = tostring(result)
+        warn("[" .. CONFIG.NAME .. "] ❌ Failed to load " .. name .. ": " .. err)
+        -- ponytail: dump the offending source line so executor chunk-wrappers can't hide it
+        local lnum = err:match(":(%d+):")
+        if lnum and src then
+            local lines = {}
+            for line in (src .. "\n"):gmatch("(.-)\n") do table.insert(lines, line) end
+            lnum = tonumber(lnum)
+            for i = math.max(1, lnum - 2), math.min(#lines, lnum + 2) do
+                warn(string.format("[%s] %s %d: %s", CONFIG.NAME, i == lnum and ">>>" or "   ", i, lines[i]:sub(1, 160)))
+            end
+            warn(string.format("[%s] (chunk has %d lines; if %d is beyond that, the executor wraps chunks)", CONFIG.NAME, #lines, lnum))
+        end
         return nil
     end
+end
+
+----------------------------------------------------------------------
+-- Safe Viewport (validates real screensize, falls back when unreadable)
+----------------------------------------------------------------------
+local function getSafeViewport()
+    local w, h = 1280, 720 -- ponytail: fallback, real size when readable
+    pcall(function()
+        local cam = workspace.CurrentCamera
+        if cam and cam.ViewportSize then
+            local vs = cam.ViewportSize
+            if vs.X > 100 and vs.Y > 100 then
+                w, h = math.floor(vs.X), math.floor(vs.Y)
+            end
+        end
+    end)
+    return w, h
 end
 
 ----------------------------------------------------------------------
@@ -211,8 +250,8 @@ local trayIcon = nil
 local trayClickRegion = nil
 
 local function createTrayIcon()
-    local camera = workspace.CurrentCamera
-    local viewportSize = camera.ViewportSize
+    local vw, vh = getSafeViewport()
+    local viewportSize = Vector2.new(vw, vh)
     
     local x = viewportSize.X - CONFIG.TRAY_ICON_MARGIN - CONFIG.TRAY_ICON_RADIUS
     local y = viewportSize.Y - CONFIG.TRAY_ICON_MARGIN - CONFIG.TRAY_ICON_RADIUS
@@ -250,6 +289,14 @@ end
 ----------------------------------------------------------------------
 local function setupInput(trayX, trayY)
     local UserInputService = game:GetService("UserInputService")
+    -- ponytail: GetMouseLocation includes topbar inset; Drawing coords are absolute
+    local function mousePos()
+        local p = UserInputService:GetMouseLocation()
+        pcall(function()
+            p = p - game:GetService("GuiService"):GetGuiInset()
+        end)
+        return p
+    end
     
     -- Toggle keybind
     local toggleConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
@@ -274,9 +321,8 @@ local function setupInput(trayX, trayY)
     -- Tray icon click detection
     local clickConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
-        
-        local mousePos = UserInputService:GetMouseLocation()
-        local dist = (mousePos - Vector2.new(trayX, trayY)).Magnitude
+
+        local dist = (mousePos() - Vector2.new(trayX, trayY)).Magnitude
         
         if dist <= CONFIG.TRAY_ICON_RADIUS + 5 then
             Analyzer._visible = not Analyzer._visible
@@ -334,9 +380,18 @@ function Analyzer._cleanup()
     print("[" .. CONFIG.NAME .. "] Cleanup complete.")
 end
 
-----------------------------------------------------------------------
--- Main Bootstrap
-----------------------------------------------------------------------
+-- Re-initializes all feature modules (used by UI.rebuild() on resize)
+function Analyzer._initModules()
+    local modules = {"UI", "Explorer", "Properties", "ScriptViewer", "RemoteSpy", "Export"}
+    for _, modName in ipairs(modules) do
+        if Analyzer[modName] and Analyzer[modName].init then
+            local ok, err = pcall(Analyzer[modName].init)
+            if not ok then
+                warn("[" .. CONFIG.NAME .. "] ⚠️ Failed to init " .. modName .. ": " .. tostring(err))
+            end
+        end
+    end
+end
 local function main()
     -- Step 1: Detect capabilities
     local caps = detectCapabilities()
@@ -372,15 +427,7 @@ local function main()
     setupInput(trayX, trayY)
     
     -- Step 6: Initialize all modules
-    local modules = {"UI", "Explorer", "Properties", "ScriptViewer", "RemoteSpy", "Export"}
-    for _, modName in ipairs(modules) do
-        if Analyzer[modName] and Analyzer[modName].init then
-            local ok, err = pcall(Analyzer[modName].init)
-            if not ok then
-                warn("[" .. CONFIG.NAME .. "] ⚠️ Failed to init " .. modName .. ": " .. tostring(err))
-            end
-        end
-    end
+    Analyzer._initModules()
     
     -- Step 7: Mark as loaded
     Analyzer._loaded = true

@@ -9,6 +9,7 @@ Analyzer.RemoteSpy = Spy
 Spy._log = {}
 Spy._paused = false
 Spy._hooked = false
+Spy._conns = {}
 Spy.MAX = 500
 
 local function serializeArgs(...)
@@ -65,17 +66,27 @@ function Spy:start()
     local hmm = getgenv().hookmetamethod
     local ncm = getgenv().getnamecallmethod
     if type(hmm) ~= "function" then return end -- executor without hook: spy stays idle
-    local old
-    old = hmm(game, "__namecall", getgenv().newcclosure and getgenv().newcclosure(function(selfObj, ...)
+    local wrap = getgenv().newcclosure
+    local function handler(selfObj, ...)
         local method = ""
         if type(ncm) == "function" then local ok, m = pcall(ncm) if ok then method = m end end
         if (method == "FireServer" or method == "InvokeServer")
             and (selfObj:IsA("RemoteEvent") or selfObj:IsA("RemoteFunction")) then
             pcall(function() Spy:push("OUT", selfObj, method, ...) end)
         end
-        return old(selfObj, ...)
-    end) or function(selfObj, ...) return old(selfObj, ...) end)
-    Analyzer._originalNamecall = old
+        return Spy._hookedFn(selfObj, ...)
+    end
+    -- ponytail: pcall everything; a throwing newcclosure/hook must idle the spy, not kill init
+    local wrapped = handler
+    if type(wrap) == "function" then
+        local wok, w = pcall(wrap, handler)
+        if wok and type(w) == "function" then wrapped = w end
+    end
+    local ok, old = pcall(hmm, game, "__namecall", wrapped)
+    if not ok or type(old) ~= "function" then return end
+    -- ponytail: keep the TRUE original across rebuild re-hooks
+    if not Analyzer._originalNamecall then Analyzer._originalNamecall = old end
+    Spy._hookedFn = old
     self._hooked = true
 end
 
@@ -101,7 +112,7 @@ function Spy.init()
     Spy._block = UI.TextBlock.new({x = area.x, y = area.y + 34, width = area.width,
         height = area.height - 34, zIndex = 120, showLineNumbers = false})
     tabs:registerContent("Remote Spy", holder)
-    table.insert(Analyzer._connections, Analyzer.Signals.TabChanged:Connect(function(name)
+    table.insert(Spy._conns, Analyzer.Signals.TabChanged:Connect(function(name)
         local show = Analyzer._visible and name == "Remote Spy"
         Spy._filterBox:setVisible(show)
         Spy._pauseBtn:setVisible(show)
@@ -115,6 +126,8 @@ function Spy.init()
 end
 
 function Spy.cleanup()
+    for _, c in ipairs(Spy._conns) do pcall(function() c.Disconnect(c) end) end
+    Spy._conns = {}
     if Analyzer._originalNamecall and type(getgenv().hookmetamethod) == "function" then
         pcall(function() getgenv().hookmetamethod(game, "__namecall", Analyzer._originalNamecall) end)
         Analyzer._originalNamecall = nil

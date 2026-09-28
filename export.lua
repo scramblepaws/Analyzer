@@ -60,7 +60,8 @@ function Export.init()
         else status("No writefile/clipboard", UI.Theme.Warning) end
     end)
     tabs:registerContent("Export", holder)
-    table.insert(Analyzer._connections, Analyzer.Signals.TabChanged:Connect(function(name)
+    Export._conns = Export._conns or {}
+    table.insert(Export._conns, Analyzer.Signals.TabChanged:Connect(function(name)
         local show = Analyzer._visible and name == "Export"
         if Export._label then Export._label:setVisible(show) end
         for _, b in ipairs(Export._btns or {}) do b:setVisible(show) end
@@ -68,6 +69,9 @@ function Export.init()
     print("[Analyzer] Export initialized")
 end
 
-function Export.cleanup() end
+function Export.cleanup()
+    for _, c in ipairs(Export._conns or {}) do pcall(function() c.Disconnect(c) end) end
+    Export._conns = {}
+end
 
 return Export

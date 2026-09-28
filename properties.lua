@@ -8,6 +8,7 @@ local Properties = {}
 Analyzer.Properties = Properties
 Properties._items = {}
 Properties._propConns = {}
+Properties._conns = {}
 Properties._current = nil
 
 -- ponytail: curated fallback, extend when a ClassName is missing
@@ -104,11 +105,11 @@ function Properties.init()
         height = area.height, zIndex = 120, itemHeight = UI.Theme.LineHeight,
         onScroll = function() Properties:_layout() end})
     tabs:registerContent("Properties", holder)
-    table.insert(Analyzer._connections, Analyzer.Signals.InstanceSelected:Connect(function(inst)
+    table.insert(Properties._conns, Analyzer.Signals.InstanceSelected:Connect(function(inst)
         tabs:switchTab("Properties")
         Properties:show(inst)
     end))
-    table.insert(Analyzer._connections, Analyzer.Signals.TabChanged:Connect(function(name)
+    table.insert(Properties._conns, Analyzer.Signals.TabChanged:Connect(function(name)
         Properties._tabActive = (name == "Properties")
         Properties:_layout()
     end))
@@ -116,6 +117,10 @@ function Properties.init()
     print("[Analyzer] Properties initialized")
 end
 
-function Properties.cleanup() Properties:clear() end
+function Properties.cleanup()
+    for _, c in ipairs(Properties._conns) do pcall(function() c.Disconnect(c) end) end
+    Properties._conns = {}
+    Properties:clear()
+end
 
 return Properties

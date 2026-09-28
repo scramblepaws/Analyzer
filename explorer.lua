@@ -146,8 +146,10 @@ end
 
 function Explorer.cleanup()
     for _, c in ipairs(Explorer._conns) do pcall(function() c.Disconnect(c) end) end
+    Explorer._conns = {}
     for _, row in ipairs(Explorer._nodes) do pcall(function() row.node:destroy() end) end
     Explorer._nodes = {}
+    Explorer._selected = nil
 end
 
 return Explorer
