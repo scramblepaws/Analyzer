@@ -81,63 +81,103 @@ Analyzer.Signals = {
 ----------------------------------------------------------------------
 -- Theme
 ----------------------------------------------------------------------
+----------------------------------------------------------------------
+-- Motion (tween helper) + Drop Shadow
+-- ponytail: one tiny tween runner; per-widget seq tokens kill stale tweens
+----------------------------------------------------------------------
+function UI.tween(dur, step)
+    task.spawn(function()
+        local t0 = os.clock()
+        while true do
+            local t = math.clamp((os.clock() - t0) / dur, 0, 1)
+            local ok = pcall(step, t)
+            if not ok or t >= 1 then break end
+            task.wait()
+        end
+    end)
+end
+
+function UI.lerpColor(a, b, t)
+    return Color3.new(
+        a.R + (b.R - a.R) * t,
+        a.G + (b.G - a.G) * t,
+        a.B + (b.B - a.B) * t)
+end
+
+function UI.shadow(x, y, w, h, zIndex)
+    local s = Pool.get("Square")
+    s.Size = Vector2.new(w, h)
+    s.Position = Vector2.new(x + 5, y + 6)
+    s.Color = Color3.fromRGB(0, 0, 0)
+    s.Filled = true
+    s.Thickness = 0
+    s.Transparency = 0.7
+    s.ZIndex = zIndex
+    s.Visible = false
+    table.insert(Analyzer._drawingObjects, s)
+    return s
+end
+
 UI.Theme = {
-    Background    = Color3.fromRGB(30, 30, 30),
-    Surface       = Color3.fromRGB(45, 45, 45),
-    SurfaceLight  = Color3.fromRGB(55, 55, 55),
-    SurfaceHover  = Color3.fromRGB(65, 65, 65),
-    Border        = Color3.fromRGB(60, 60, 60),
-    BorderLight   = Color3.fromRGB(80, 80, 80),
-    Text          = Color3.fromRGB(220, 220, 220),
-    TextDim       = Color3.fromRGB(140, 140, 140),
-    TextDark      = Color3.fromRGB(100, 100, 100),
-    Accent        = Color3.fromRGB(0, 162, 255),
-    AccentHover   = Color3.fromRGB(40, 180, 255),
-    AccentDim     = Color3.fromRGB(0, 100, 180),
-    Error         = Color3.fromRGB(255, 80, 80),
-    Warning       = Color3.fromRGB(255, 200, 60),
-    Success       = Color3.fromRGB(80, 200, 80),
+    Background    = Color3.fromRGB(11, 14, 23),
+    Surface       = Color3.fromRGB(18, 24, 39),
+    SurfaceLight  = Color3.fromRGB(28, 37, 62),
+    SurfaceHover  = Color3.fromRGB(38, 50, 82),
+    Border        = Color3.fromRGB(42, 58, 96),
+    BorderLight   = Color3.fromRGB(74, 96, 148),
+    Text          = Color3.fromRGB(205, 220, 255),
+    TextDim       = Color3.fromRGB(110, 130, 175),
+    TextDark      = Color3.fromRGB(66, 80, 116),
+    Accent        = Color3.fromRGB(0, 240, 255),
+    AccentHover   = Color3.fromRGB(130, 250, 255),
+    AccentDim     = Color3.fromRGB(8, 62, 82),
+    Magenta       = Color3.fromRGB(255, 42, 109),
+    Error         = Color3.fromRGB(255, 42, 109),
+    Warning       = Color3.fromRGB(249, 240, 2),
+    Success       = Color3.fromRGB(57, 255, 20),
     
     -- Class colors for Explorer
     ClassColors = {
-        Script        = Color3.fromRGB(255, 165, 0),
-        LocalScript   = Color3.fromRGB(255, 165, 0),
-        ModuleScript  = Color3.fromRGB(255, 140, 50),
-        Part          = Color3.fromRGB(0, 200, 255),
-        MeshPart      = Color3.fromRGB(0, 200, 255),
-        UnionOperation = Color3.fromRGB(0, 200, 255),
-        WedgePart     = Color3.fromRGB(0, 200, 255),
-        TrussPart     = Color3.fromRGB(0, 200, 255),
-        Model         = Color3.fromRGB(255, 220, 60),
-        Folder        = Color3.fromRGB(255, 220, 60),
-        RemoteEvent   = Color3.fromRGB(255, 80, 80),
-        RemoteFunction = Color3.fromRGB(255, 80, 80),
-        BindableEvent = Color3.fromRGB(255, 120, 120),
-        BindableFunction = Color3.fromRGB(255, 120, 120),
-        Frame         = Color3.fromRGB(80, 200, 80),
-        TextLabel     = Color3.fromRGB(80, 200, 80),
-        TextButton    = Color3.fromRGB(80, 200, 80),
-        TextBox       = Color3.fromRGB(80, 200, 80),
-        ImageLabel    = Color3.fromRGB(80, 200, 80),
-        ImageButton   = Color3.fromRGB(80, 200, 80),
-        ScrollingFrame = Color3.fromRGB(80, 200, 80),
-        ScreenGui     = Color3.fromRGB(80, 200, 80),
-        BillboardGui  = Color3.fromRGB(80, 200, 80),
-        SurfaceGui    = Color3.fromRGB(80, 200, 80),
+        Script        = Color3.fromRGB(255, 158, 0),
+        LocalScript   = Color3.fromRGB(255, 158, 0),
+        ModuleScript  = Color3.fromRGB(255, 110, 200),
+        Part          = Color3.fromRGB(0, 240, 255),
+        MeshPart      = Color3.fromRGB(0, 240, 255),
+        UnionOperation = Color3.fromRGB(0, 240, 255),
+        WedgePart     = Color3.fromRGB(0, 240, 255),
+        TrussPart     = Color3.fromRGB(0, 240, 255),
+        Model         = Color3.fromRGB(249, 240, 2),
+        Folder        = Color3.fromRGB(249, 240, 2),
+        RemoteEvent   = Color3.fromRGB(255, 42, 109),
+        RemoteFunction = Color3.fromRGB(255, 42, 109),
+        BindableEvent = Color3.fromRGB(255, 120, 190),
+        BindableFunction = Color3.fromRGB(255, 120, 190),
+        Frame         = Color3.fromRGB(57, 255, 20),
+        TextLabel     = Color3.fromRGB(57, 255, 20),
+        TextButton    = Color3.fromRGB(57, 255, 20),
+        TextBox       = Color3.fromRGB(57, 255, 20),
+        ImageLabel    = Color3.fromRGB(57, 255, 20),
+        ImageButton   = Color3.fromRGB(57, 255, 20),
+        ScrollingFrame = Color3.fromRGB(57, 255, 20),
+        ScreenGui     = Color3.fromRGB(57, 255, 20),
+        BillboardGui  = Color3.fromRGB(57, 255, 20),
+        SurfaceGui    = Color3.fromRGB(57, 255, 20),
     },
     
     -- Syntax highlighting colors
     Syntax = {
-        Keyword  = Color3.fromRGB(0, 162, 255),
-        String   = Color3.fromRGB(80, 200, 80),
-        Comment  = Color3.fromRGB(120, 120, 120),
-        Number   = Color3.fromRGB(255, 165, 0),
-        BuiltIn  = Color3.fromRGB(200, 140, 255),
-        Default  = Color3.fromRGB(220, 220, 220),
+        Keyword  = Color3.fromRGB(0, 240, 255),
+        String   = Color3.fromRGB(126, 255, 170),
+        Comment  = Color3.fromRGB(92, 102, 150),
+        Number   = Color3.fromRGB(255, 42, 109),
+        BuiltIn  = Color3.fromRGB(255, 158, 0),
+        Default  = Color3.fromRGB(205, 220, 255),
     },
     
     -- Layout
     FontSize       = 14,
+    MenuHeight     = 26,
+    PaneHeadHeight = 22,
     SmallFontSize  = 12,
     LineHeight     = 20,
     TabHeight      = 30,
@@ -689,22 +729,31 @@ function Button.new(props)
 end
 
 function Button:setActive(active)
+    self._hoverSeq = (self._hoverSeq or 0) + 1
     self._isActive = active
     self._bgRect:setFillColor(active and self._activeColor or self._normalColor)
     self._bgRect:redraw()
 end
 
+function Button:_tweenFill(target)
+    local from = self._bgRect._fillColor
+    self._hoverSeq = (self._hoverSeq or 0) + 1
+    local seq = self._hoverSeq
+    UI.tween(0.09, function(t)
+        if seq ~= self._hoverSeq then return end
+        self._bgRect:setFillColor(UI.lerpColor(from, target, t))
+    end)
+end
+
 function Button:onHoverStart()
     if not self._isActive then
-        self._bgRect:setFillColor(self._hoverColor)
-        self._bgRect:redraw()
+        self:_tweenFill(self._hoverColor)
     end
 end
 
 function Button:onHoverEnd()
     if not self._isActive then
-        self._bgRect:setFillColor(self._normalColor)
-        self._bgRect:redraw()
+        self:_tweenFill(self._normalColor)
     end
 end
 
@@ -755,8 +804,9 @@ function Tab.new(props)
     
     self._tabName = props.tabName or props.text
     
-    -- Accent underline (visible when active)
-    self._underline = Pool.get("Square")
+    -- Accent underline (visible when active; menu uses one shared sliding bar instead)
+    if not props.noUnderline then
+        self._underline = Pool.get("Square")
     self._underline.Size = Vector2.new(self._width, 2)
     self._underline.Position = Vector2.new(self._absX, self._absY + self._height - 2)
     self._underline.Color = UI.Theme.Accent
@@ -765,14 +815,20 @@ function Tab.new(props)
     self._underline.ZIndex = self._zIndex + 5
     self._underline.Visible = false
     table.insert(self._drawingObjects, self._underline)
+    end
     
     return self
 end
 
 function Tab:setActive(active)
+    self._hoverSeq = (self._hoverSeq or 0) + 1
     self._isActive = active
     self._bgRect:setFillColor(active and self._activeColor or self._normalColor)
     self._bgRect:redraw()
+    if self._label then
+        self._label:setColor(active and UI.Theme.Accent or UI.Theme.TextDim)
+        self._label:redraw()
+    end
     if self._underline then
         self._underline.Visible = active and self._visible
     end
@@ -795,144 +851,6 @@ function Tab:setVisible(visible)
 end
 
 UI.Tab = Tab
-
-----------------------------------------------------------------------
--- TabContainer Widget
-----------------------------------------------------------------------
-local TabContainer = setmetatable({}, {__index = Widget})
-TabContainer.__index = TabContainer
-
-function TabContainer.new(props)
-    local self = Widget.new(props)
-    setmetatable(self, TabContainer)
-    
-    self._tabs = {}
-    self._tabNames = props.tabs or {}
-    self._activeTab = nil
-    self._contentPanels = {}
-    self._tabWidth = props.tabWidth or 100
-    
-    -- Tab bar background
-    self._barBg = Rect.new({
-        x = 0, y = 0,
-        width = self._width,
-        height = UI.Theme.TabHeight,
-        fillColor = UI.Theme.Background,
-        borderColor = UI.Theme.Border,
-        borderThickness = 0,
-        zIndex = self._zIndex,
-    })
-    self:addChild(self._barBg)
-    
-    -- Bottom border of tab bar
-    self._barBorder = Pool.get("Square")
-    self._barBorder.Size = Vector2.new(self._width, 1)
-    self._barBorder.Position = Vector2.new(self._absX, self._absY + UI.Theme.TabHeight)
-    self._barBorder.Color = UI.Theme.Border
-    self._barBorder.Filled = true
-    self._barBorder.Thickness = 0
-    self._barBorder.ZIndex = self._zIndex + 1
-    self._barBorder.Visible = false
-    table.insert(self._drawingObjects, self._barBorder)
-    
-    -- Create tabs
-    for i, tabName in ipairs(self._tabNames) do
-        local tab = Tab.new({
-            x = (i - 1) * self._tabWidth,
-            y = 0,
-            width = self._tabWidth,
-            height = UI.Theme.TabHeight,
-            text = tabName,
-            tabName = tabName,
-            zIndex = self._zIndex + 2,
-            onClick = function()
-                self:switchTab(tabName)
-            end,
-        })
-        self:addChild(tab)
-        self._tabs[tabName] = tab
-    end
-    
-    -- Content area
-    self._contentArea = {
-        x = 0,
-        y = UI.Theme.TabHeight + 1,
-        width = self._width,
-        height = self._height - UI.Theme.TabHeight - 1,
-    }
-    
-    return self
-end
-
-function TabContainer:switchTab(tabName)
-    if self._activeTab == tabName then return end
-    
-    local oldTab = self._activeTab
-    self._activeTab = tabName
-    
-    -- Update tab active states
-    for name, tab in pairs(self._tabs) do
-        tab:setActive(name == tabName)
-    end
-    
-    -- Show/hide content panels
-    for name, panel in pairs(self._contentPanels) do
-        if panel.setVisible then
-            panel:setVisible(name == tabName and self._visible)
-        end
-    end
-    
-    -- Fire signal
-    Analyzer.Signals.TabChanged:Fire(tabName, oldTab)
-end
-
-function TabContainer:registerContent(tabName, panel)
-    self._contentPanels[tabName] = panel
-    panel:setVisible(tabName == self._activeTab and self._visible)
-end
-
-function TabContainer:getContentArea()
-    return self._contentArea
-end
-
-function TabContainer:getActiveTab()
-    return self._activeTab
-end
-
-function TabContainer:redraw()
-    self._barBg:setSize(self._width, UI.Theme.TabHeight)
-    self._barBg:_updateAbsolutePosition()
-    self._barBg:redraw()
-    
-    if self._barBorder then
-        self._barBorder.Position = Vector2.new(self._absX, self._absY + UI.Theme.TabHeight)
-        self._barBorder.Size = Vector2.new(self._width, 1)
-        self._barBorder.Visible = self._visible
-    end
-    
-    for _, tab in pairs(self._tabs) do
-        tab:_updateAbsolutePosition()
-        tab:redraw()
-    end
-end
-
-function TabContainer:setVisible(visible)
-    self._visible = visible
-    self._barBg:setVisible(visible)
-    if self._barBorder then
-        self._barBorder.Visible = visible
-    end
-    for _, tab in pairs(self._tabs) do
-        tab:setVisible(visible)
-    end
-    for name, panel in pairs(self._contentPanels) do
-        if panel.setVisible then
-            panel:setVisible(name == self._activeTab and visible)
-        end
-    end
-end
-
-UI.TabContainer = TabContainer
 
 ----------------------------------------------------------------------
 -- ScrollContainer Widget
@@ -1123,10 +1041,10 @@ function TreeNode.new(props)
     self._expandIcon.Visible = false
     table.insert(self._drawingObjects, self._expandIcon)
     
-    -- Class color dot
-    self._classDot = Pool.get("Circle")
-    self._classDot.Position = Vector2.new(self._absX + indent + 18, self._absY + rowHeight / 2)
-    self._classDot.Radius = 4
+    -- Class color chip (square: no rounded edges in this UI)
+    self._classDot = Pool.get("Square")
+    self._classDot.Size = Vector2.new(8, 8)
+    self._classDot.Position = Vector2.new(self._absX + indent + 16, self._absY + rowHeight / 2 - 4)
     self._classDot.Color = UI.getClassColor(self._className)
     self._classDot.Filled = true
     self._classDot.Thickness = 0
@@ -1199,8 +1117,19 @@ end
 
 function TreeNode:setSelected(selected)
     self._selected = selected
-    if self._rowBg then
-        self._rowBg.Color = selected and UI.Theme.AccentDim or UI.Theme.Background
+    if not self._rowBg then return end
+    if selected then
+        -- ponytail: neon flash decaying to selection bg, token kills stale tweens
+        self._rowBg.Color = UI.Theme.Accent
+        self._flashSeq = (self._flashSeq or 0) + 1
+        local seq, bg = self._flashSeq, self._rowBg
+        UI.tween(0.22, function(t)
+            if seq ~= self._flashSeq then return end
+            bg.Color = UI.lerpColor(UI.Theme.Accent, UI.Theme.AccentDim, t)
+        end)
+    else
+        self._flashSeq = (self._flashSeq or 0) + 1
+        self._rowBg.Color = UI.Theme.Background
     end
 end
 
@@ -1250,7 +1179,7 @@ function TreeNode:updatePosition(x, y)
         self._expandIcon.Position = Vector2.new(x + indent + 2, y + 2)
     end
     if self._classDot then
-        self._classDot.Position = Vector2.new(x + indent + 18, y + rowHeight / 2)
+        self._classDot.Position = Vector2.new(x + indent + 16, y + rowHeight / 2 - 4)
     end
     if self._nameLabel then
         self._nameLabel.Position = Vector2.new(x + indent + 28, y + 2)
@@ -1816,6 +1745,7 @@ function Notification.show(text, duration, color)
     
     -- Background
     local bg = Drawing.new("Square")
+    local bgShadow = Drawing.new("Square")
     bg.Size = Vector2.new(#text * 8 + 20, 28)
     bg.Position = Vector2.new(
         viewportSize.X / 2 - (#text * 8 + 20) / 2,
@@ -1827,6 +1757,14 @@ function Notification.show(text, duration, color)
     bg.Transparency = 0.9
     bg.ZIndex = 10000
     bg.Visible = true
+    bgShadow.Size = bg.Size
+    bgShadow.Position = Vector2.new(bg.Position.X + 4, bg.Position.Y + 5)
+    bgShadow.Color = Color3.fromRGB(0, 0, 0)
+    bgShadow.Filled = true
+    bgShadow.Thickness = 0
+    bgShadow.Transparency = 0.7
+    bgShadow.ZIndex = 9999
+    bgShadow.Visible = true
     
     -- Border
     local border = Drawing.new("Square")
@@ -1852,11 +1790,26 @@ function Notification.show(text, duration, color)
     textObj.Center = true
     textObj.ZIndex = 10002
     textObj.Visible = true
+
+    -- Slide-up entrance (square edges, magenta border stays sharp)
+    local finalY = bg.Position.Y
+    for _, o in ipairs({bg, border}) do
+        o.Position = Vector2.new(o.Position.X, finalY + 18)
+    end
+    textObj.Position = Vector2.new(textObj.Position.X, finalY + 23)
+    UI.tween(0.16, function(t)
+        local y = finalY + 18 * (1 - t)
+        bg.Position = Vector2.new(bg.Position.X, y)
+        bgShadow.Position = Vector2.new(bg.Position.X + 4, y + 5)
+        border.Position = Vector2.new(border.Position.X, y)
+        textObj.Position = Vector2.new(textObj.Position.X, y + 5)
+    end)
     
     -- Auto-hide after duration
     task.delay(duration, function()
         pcall(function()
             bg:Remove()
+            bgShadow:Remove()
             border:Remove()
             textObj:Remove()
         end)
@@ -1869,8 +1822,39 @@ end
 local MainWindow = {}
 UI.MainWindow = MainWindow
 
+-- ponytail: one-liner chrome squares/text (bars, ticks, dividers, headers)
+local function chromeSquare(x, y, w, h, color, z)
+    local o = Pool.get("Square")
+    o.Size = Vector2.new(w, h)
+    o.Position = Vector2.new(x, y)
+    o.Color = color
+    o.Filled = true
+    o.Thickness = 0
+    o.Transparency = 1
+    o.ZIndex = z
+    o.Visible = false
+    table.insert(Analyzer._drawingObjects, o)
+    table.insert(UI._chrome, o)
+    return o
+end
+
+local function chromeText(text, x, y, color, size, z)
+    local o = Pool.get("Text")
+    o.Text = text
+    o.Position = Vector2.new(x, y)
+    o.Color = color
+    o.Size = size
+    o.Font = 2
+    o.ZIndex = z
+    o.Visible = false
+    table.insert(Analyzer._drawingObjects, o)
+    table.insert(UI._chrome, o)
+    return o
+end
+
 local _mainWindow = nil
-local _tabContainer = nil
+local _sections = nil -- Sections shim (registerContent/switchTab API the modules use)
+UI._chrome = {} -- window furniture toggled together
 
 function MainWindow.create()
     local vw, vh = UI.getViewport()
@@ -1881,13 +1865,27 @@ function MainWindow.create()
     local winY = margin
     local winW = vw - margin * 2
     local winH = vh - margin * 2
+    local menuH = UI.Theme.MenuHeight
+    local headH = UI.Theme.PaneHeadHeight
+    local pad = 8
+    local treeW = math.max(200, math.floor(winW * 0.34))
+    local paneTop = winY + UI.Theme.TitleBarHeight + 1 + menuH + 1
+    local paneH = winY + winH - paneTop
     
     -- Store dimensions globally
     UI._windowX = winX
     UI._windowY = winY
     UI._windowW = winW
     UI._windowH = winH
+    UI._treeArea = {x = winX + pad, y = paneTop + headH, width = treeW - pad * 2, height = paneH - headH}
+    UI._contentArea = {x = winX + treeW + pad, y = paneTop + headH, width = winW - treeW - pad * 2, height = paneH - headH}
+    UI._chrome = {}
+    UI._titleBarBg, UI._titleText, UI._statsText, UI._titleBorder = nil, nil, nil, nil
+    UI._menuBar, UI._sectionLabel, UI._contentFlash = nil, nil, nil
     
+    -- Drop shadow (single offset layer, no rounded edges anywhere)
+    table.insert(UI._chrome, UI.shadow(winX, winY, winW, winH, 99))
+
     -- Window background
     _mainWindow = Rect.new({
         x = winX,
@@ -1911,10 +1909,11 @@ function MainWindow.create()
     titleBarBg.Visible = false
     table.insert(Analyzer._drawingObjects, titleBarBg)
     UI._titleBarBg = titleBarBg
+    table.insert(UI._chrome, titleBarBg)
     
     -- Title text
     local titleText = Pool.get("Text")
-    titleText.Text = Analyzer._name .. " v" .. Analyzer._version
+    titleText.Text = "// " .. string.upper(Analyzer._name) .. " v" .. Analyzer._version
     titleText.Position = Vector2.new(winX + UI.Theme.Padding, winY + 6)
     titleText.Color = UI.Theme.Accent
     titleText.Size = UI.Theme.FontSize
@@ -1923,6 +1922,7 @@ function MainWindow.create()
     titleText.Visible = false
     table.insert(Analyzer._drawingObjects, titleText)
     UI._titleText = titleText
+    table.insert(UI._chrome, titleText)
     
     -- Pool stats text (top right)
     local statsText = Pool.get("Text")
@@ -1935,34 +1935,115 @@ function MainWindow.create()
     statsText.Visible = false
     table.insert(Analyzer._drawingObjects, statsText)
     UI._statsText = statsText
+    table.insert(UI._chrome, statsText)
     
     -- Title bar border bottom
     local titleBorder = Pool.get("Square")
     titleBorder.Size = Vector2.new(winW, 1)
     titleBorder.Position = Vector2.new(winX, winY + UI.Theme.TitleBarHeight)
-    titleBorder.Color = UI.Theme.Border
+    titleBorder.Color = UI.Theme.Accent
     titleBorder.Filled = true
     titleBorder.Thickness = 0
     titleBorder.ZIndex = 101
     titleBorder.Visible = false
     table.insert(Analyzer._drawingObjects, titleBorder)
     UI._titleBorder = titleBorder
+    table.insert(UI._chrome, titleBorder)
     
-    -- Tab container
-    local tabY = winY + UI.Theme.TitleBarHeight + 1
-    _tabContainer = TabContainer.new({
-        x = winX,
-        y = tabY,
-        width = winW,
-        height = winH - UI.Theme.TitleBarHeight - 1,
-        tabs = {"Explorer", "Properties", "Scripts", "Remote Spy", "Export"},
-        tabWidth = math.floor(winW / 5),
-        zIndex = 110,
-    })
-    UI._tabContainer = _tabContainer
+    -- Section menu (flat tabs + one shared sliding magenta bar)
+    local menuY = winY + UI.Theme.TitleBarHeight + 1
+    local sectionNames = {"Properties", "Scripts", "Remote Spy", "Export"}
+    local tabW = math.floor(winW / #sectionNames)
+    _sections = { _tabs = {}, _contentPanels = {}, _activeTab = nil }
+    for i, sname in ipairs(sectionNames) do
+        local tab = Tab.new({
+            x = winX + (i - 1) * tabW,
+            y = menuY,
+            width = tabW,
+            height = menuH,
+            text = string.upper(sname),
+            tabName = sname,
+            noUnderline = true,
+            zIndex = 110,
+            onClick = function() _sections:switchTab(sname) end,
+        })
+        _sections._tabs[sname] = tab
+    end
+    chromeSquare(winX, menuY + menuH - 1, winW, 1, UI.Theme.Border, 109)
+    UI._menuBar = chromeSquare(winX, menuY + menuH - 2, tabW, 2, UI.Theme.Magenta, 111)
+
+    -- Left pane header (explorer) + divider + right pane header
+    chromeSquare(winX, paneTop, treeW, headH, UI.Theme.Surface, 105)
+    chromeSquare(winX, paneTop, 3, headH, UI.Theme.Accent, 106)
+    chromeText("// EXPLORER", winX + 10, paneTop + 4, UI.Theme.TextDim, UI.Theme.SmallFontSize, 106)
+    chromeSquare(winX + treeW, paneTop, 1, paneH, UI.Theme.BorderLight, 105)
+    chromeSquare(winX + treeW + 1, paneTop, winW - treeW - 1, headH, UI.Theme.Surface, 105)
+    chromeSquare(winX + treeW + 1, paneTop, 3, headH, UI.Theme.Magenta, 106)
+    UI._sectionLabel = chromeText("// PROPERTIES", winX + treeW + 11, paneTop + 4, UI.Theme.Magenta, UI.Theme.SmallFontSize, 106)
+
+    -- Content-switch flash frame (border-only, rests invisible)
+    local flash = Pool.get("Square")
+    flash.Size = Vector2.new(UI._contentArea.width, UI._contentArea.height)
+    flash.Position = Vector2.new(UI._contentArea.x, UI._contentArea.y)
+    flash.Color = UI.Theme.Magenta
+    flash.Filled = false
+    flash.Thickness = 1
+    flash.Transparency = 1
+    flash.ZIndex = 130
+    flash.Visible = false
+    table.insert(Analyzer._drawingObjects, flash)
+    table.insert(UI._chrome, flash)
+    UI._contentFlash = flash
+
+    function _sections:switchTab(tabName)
+        if self._activeTab == tabName then return end
+        local oldTab = self._activeTab
+        self._activeTab = tabName
+        for name, tab in pairs(self._tabs) do tab:setActive(name == tabName) end
+        for name, panel in pairs(self._contentPanels) do
+            if panel.setVisible then panel:setVisible(name == tabName and Analyzer._visible) end
+        end
+        local tab = self._tabs[tabName]
+        if tab and UI._menuBar then
+            UI._menuBarSeq = (UI._menuBarSeq or 0) + 1
+            local seq, bar, fromX, toX = UI._menuBarSeq, UI._menuBar, UI._menuBar.Position.X, tab._absX
+            UI.tween(0.14, function(t)
+                if seq ~= UI._menuBarSeq then return end
+                bar.Position = Vector2.new(fromX + (toX - fromX) * t, bar.Position.Y)
+            end)
+        end
+        if UI._sectionLabel then
+            UI._sectionLabel.Text = "// " .. string.upper(tabName)
+        end
+        if UI._contentFlash and Analyzer._visible then
+            local fl = UI._contentFlash
+            fl.Visible = true
+            UI.tween(0.3, function(t) fl.Transparency = 0.2 + 0.8 * t end)
+        end
+        Analyzer.Signals.TabChanged:Fire(tabName, oldTab)
+    end
+    function _sections:registerContent(tabName, panel)
+        self._contentPanels[tabName] = panel
+        panel:setVisible(tabName == self._activeTab and Analyzer._visible)
+    end
+    function _sections:getActiveTab() return self._activeTab end
+
+    -- Accent pulse on the title line (one object, cheap heartbeat)
+    UI._pulseOn = true
+    local accentLine = titleBorder
+    task.spawn(function()
+        local t = 0
+        while UI._pulseOn and getgenv().Analyzer ~= nil do
+            task.wait(0.06)
+            t = t + 0.06
+            pcall(function()
+                accentLine.Transparency = 0.55 + 0.45 * math.abs(math.sin(t * 2.2))
+            end)
+        end
+    end)
     
-    -- Default to Explorer tab
-    _tabContainer:switchTab("Explorer")
+    -- Default section (tree is always visible on the left)
+    _sections:switchTab("Properties")
     
     -- Start hidden
     MainWindow.setVisible(false)
@@ -1974,38 +2055,32 @@ function MainWindow.setVisible(visible)
     if _mainWindow then
         _mainWindow:setVisible(visible)
     end
-    if UI._titleBarBg then UI._titleBarBg.Visible = visible end
-    if UI._titleText then UI._titleText.Visible = visible end
-    if UI._statsText then
-        UI._statsText.Visible = visible
-        if visible then
-            local stats = Pool.getStats()
-            UI._statsText.Text = string.format("Drawing: %d active / %d pooled", stats.active, stats.pooled)
-        end
+    for _, obj in ipairs(UI._chrome or {}) do
+        pcall(function() obj.Visible = visible end)
     end
-    if UI._titleBorder then UI._titleBorder.Visible = visible end
-    if _tabContainer then
-        _tabContainer:_updateAbsolutePosition()
-        _tabContainer:setVisible(visible)
+    if _sections then
+        for _, tab in pairs(_sections._tabs) do tab:setVisible(visible) end
+    end
+    if UI._statsText and visible then
+        local stats = Pool.getStats()
+        UI._statsText.Text = string.format("Drawing: %d active / %d pooled", stats.active, stats.pooled)
+    end
+    if _sections and _sections._activeTab then
         -- ponytail: re-fire so modules refresh their pooled rows on toggle
-        local active = _tabContainer._activeTab
-        if active then pcall(function() Analyzer.Signals.TabChanged:Fire(active, nil) end) end
+        pcall(function() Analyzer.Signals.TabChanged:Fire(_sections._activeTab, nil) end)
     end
 end
 
 function MainWindow.getTabContainer()
-    return _tabContainer
+    return _sections
 end
 
 function MainWindow.getContentArea()
-    if not _tabContainer then return nil end
-    local area = _tabContainer:getContentArea()
-    return {
-        x = UI._windowX + area.x,
-        y = UI._windowY + UI.Theme.TitleBarHeight + 1 + area.y,
-        width = area.width,
-        height = area.height,
-    }
+    return UI._contentArea
+end
+
+function MainWindow.getTreeArea()
+    return UI._treeArea
 end
 
 ----------------------------------------------------------------------
@@ -2067,6 +2142,7 @@ end
 
 function UI.cleanup()
     UI._watching = false
+    UI._pulseOn = false
     Pool.releaseAll()
     
     for _, conn in ipairs(Input._connections) do
@@ -2076,7 +2152,7 @@ function UI.cleanup()
     Input._widgets = {}
     
     _mainWindow = nil
-    _tabContainer = nil
+    _sections = nil
 end
 
 return UI

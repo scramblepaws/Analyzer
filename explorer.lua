@@ -117,7 +117,7 @@ function Explorer:refresh()
 end
 
 function Explorer.init()
-    local area = UI.MainWindow.getContentArea()
+    local area = UI.MainWindow.getTreeArea()
     Explorer._area = area
     local tabs = UI.MainWindow.getTabContainer()
     local holder = UI.Widget.new({x = area.x, y = area.y, width = area.width, height = area.height, zIndex = 115})
@@ -135,7 +135,7 @@ function Explorer.init()
     tabs:registerContent("Explorer", holder)
     -- show/hide with tab: hook visibility via TabChanged
     table.insert(Explorer._conns, Analyzer.Signals.TabChanged:Connect(function(name)
-        Explorer._tabActive = (name == "Explorer")
+        Explorer._tabActive = true -- tree pane is always visible in single-menu layout
         Explorer:_layout()
     end))
     Explorer._tabActive = true -- default tab

@@ -256,9 +256,9 @@ local function createTrayIcon()
     local x = viewportSize.X - CONFIG.TRAY_ICON_MARGIN - CONFIG.TRAY_ICON_RADIUS
     local y = viewportSize.Y - CONFIG.TRAY_ICON_MARGIN - CONFIG.TRAY_ICON_RADIUS
     
-    trayIcon = Drawing.new("Circle")
+    trayIcon = Drawing.new("Square")
     trayIcon.Position = Vector2.new(x, y)
-    trayIcon.Radius = CONFIG.TRAY_ICON_RADIUS
+    trayIcon.Size = Vector2.new(CONFIG.TRAY_ICON_RADIUS * 2, CONFIG.TRAY_ICON_RADIUS * 2)
     trayIcon.Color = CONFIG.TRAY_ICON_COLOR
     trayIcon.Filled = true
     trayIcon.Thickness = 0
@@ -268,10 +268,10 @@ local function createTrayIcon()
     
     table.insert(Analyzer._drawingObjects, trayIcon)
     
-    -- Outline ring
-    local trayOutline = Drawing.new("Circle")
-    trayOutline.Position = Vector2.new(x, y)
-    trayOutline.Radius = CONFIG.TRAY_ICON_RADIUS + 2
+    -- Outline frame (square: no rounded edges in this UI)
+    local trayOutline = Drawing.new("Square")
+    trayOutline.Position = Vector2.new(x - 2, y - 2)
+    trayOutline.Size = Vector2.new(CONFIG.TRAY_ICON_RADIUS * 2 + 4, CONFIG.TRAY_ICON_RADIUS * 2 + 4)
     trayOutline.Color = Color3.fromRGB(60, 60, 60)
     trayOutline.Filled = false
     trayOutline.Thickness = 1
@@ -322,7 +322,7 @@ local function setupInput(trayX, trayY)
     local clickConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
 
-        local dist = (mousePos() - Vector2.new(trayX, trayY)).Magnitude
+        local dist = (mousePos() - Vector2.new(trayX + CONFIG.TRAY_ICON_RADIUS, trayY + CONFIG.TRAY_ICON_RADIUS)).Magnitude
         
         if dist <= CONFIG.TRAY_ICON_RADIUS + 5 then
             Analyzer._visible = not Analyzer._visible
